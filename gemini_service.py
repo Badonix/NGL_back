@@ -61,9 +61,14 @@ You are a financial data extraction expert specializing in Georgian financial st
 - Changes in Working Capital (სამუშაო კაპიტალის ცვლილებები)
 - Free Cash Flow/FCF (calculated)
 
+Besides it, save all available financial data to the summerized data field, including summerized info about company, everthing important.
+
 Please provide the response in the following JSON structure:
 
 {
+    "summerized_data": {
+    // All data including important financial data, company info etc. 
+    },
   "financial_analysis": {
     "income_statement": {
       "revenue_sales": {"2022": "number", "2023": "number"},
