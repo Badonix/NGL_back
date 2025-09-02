@@ -1,9 +1,11 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import os
 from extractor import extract_text_from_file
 from gemini_service import GeminiFinancialExtractor
 
 app = Flask(__name__)
+CORS(app)
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -41,11 +43,16 @@ def evaluate():
 
         if gemini_extractor:
             financial_analysis = gemini_extractor.extract_financial_data(extracted_text)
-            response_data["financial_analysis"] = financial_analysis
+            response_data["success"] = True
+            response_data["data"] = {
+                "financial_analysis": financial_analysis
+            }
         else:
-            response_data["financial_analysis"] = {
-                "success": False,
-                "error": "Gemini API not configured. Please set GEMINI_API_KEY environment variable."
+            response_data["success"] = False
+            response_data["data"] = {
+                "financial_analysis": {
+                    "error": "Gemini API not configured. Please set GEMINI_API_KEY environment variable."
+                }
             }
 
         return jsonify(response_data), 200
