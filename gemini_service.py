@@ -2,6 +2,15 @@ import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 import json
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import inch
+from reportlab.lib.colors import black, blue
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from datetime import datetime
+import os
 
 load_dotenv()
 
@@ -20,6 +29,7 @@ class GeminiFinancialExtractor:
             "temperature": 0.1,  # Lower temperature for more consistent JSON output
         }
         
+        # Define the financial prompt
         self.financial_prompt = """
 You are a financial data extraction expert specializing in Georgian financial statements. Analyze the provided document and extract the specific financial line items listed below in a structured JSON format.
 
@@ -67,7 +77,7 @@ Please provide the response in the following JSON structure:
 
 {
     "summerized_data": {
-    // All data including important financial data, company info etc. 
+    // All data including important financial data, company info etc. make more focus on financial data 
     },
   "financial_analysis": {
     "income_statement": {
@@ -113,6 +123,57 @@ Please provide the response in the following JSON structure:
 
 Document content to analyze:
 """
+        
+        # Register fonts that support Georgian characters
+        self._register_fonts()
+        
+        # PDF styles
+        self.styles = getSampleStyleSheet()
+        self.title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=self.styles['Heading1'],
+            fontSize=16,
+            spaceAfter=12,
+            textColor=blue,
+            fontName='DejaVuSans'
+        )
+        self.heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=self.styles['Heading2'],
+            fontSize=14,
+            spaceAfter=8,
+            textColor=black,
+            fontName='DejaVuSans'
+        )
+        self.normal_style = ParagraphStyle(
+            'CustomNormal',
+            parent=self.styles['Normal'],
+            fontSize=11,
+            spaceAfter=6,
+            fontName='DejaVuSans'
+        )
+    
+    def _register_fonts(self):
+        """Register fonts that support Georgian characters"""
+        try:
+            # Try to register DejaVu Sans which supports Georgian
+            font_paths = [
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                '/usr/share/fonts/TTF/DejaVuSans.ttf',
+                '/System/Library/Fonts/Helvetica.ttc',  # macOS fallback
+                '/Windows/Fonts/arial.ttf'  # Windows fallback
+            ]
+            
+            for font_path in font_paths:
+                if os.path.exists(font_path):
+                    pdfmetrics.registerFont(TTFont('DejaVuSans', font_path))
+                    return
+            
+            # If no suitable font found, use default
+            print("Warning: No Georgian-compatible font found, using default font")
+            
+        except Exception as e:
+            print(f"Warning: Could not register custom font: {e}")
 
     def extract_financial_data(self, document_text):
         try:
@@ -158,9 +219,21 @@ Document content to analyze:
                                     break
                 
                 financial_data = json.loads(json_text)
+                print(financial_data["summerized_data"])
+                
+                # Generate PDF if summarized data is available
+                pdf_result = None
+                if "summerized_data" in financial_data and financial_data["summerized_data"]:
+                    pdf_filename = f"financial_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                    pdf_path = f"public/pdfs/{pdf_filename}"
+                    pdf_result = self.create_summary_pdf(financial_data["summerized_data"], pdf_path)
+                    if pdf_result["success"]:
+                        pdf_result["public_url"] = f"/pdfs/{pdf_filename}"
+                
                 return {
                     "success": True,
                     "data": financial_data,
+                    "pdf_result": pdf_result
                 }
             except json.JSONDecodeError as e:
                 # If JSON parsing still fails, try to extract partial data
@@ -199,9 +272,92 @@ Document content to analyze:
                 }
                 
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"Gemini API error: {str(e)}",
-                "raw_response": None
-            }
+                            return {
+                    "success": False,
+                    "error": f"Gemini API error: {str(e)}",
+                    "raw_response": None
+                }
     
+    def _sanitize_text(self, text):
+        """Sanitize text for PDF generation, handling Georgian characters"""
+        if not isinstance(text, str):
+            text = str(text)
+        
+        # Replace problematic characters that might cause PDF issues
+        text = text.replace('&', '&amp;')
+        text = text.replace('<', '&lt;')
+        text = text.replace('>', '&gt;')
+        
+        return text
+    
+    def _format_key(self, key):
+        """Format dictionary keys for display"""
+        return key.replace('_', ' ').replace('-', ' ').title()
+    
+    def _process_data_recursively(self, data, story, level=0, max_level=5):
+        """Recursively process nested data structures"""
+        if level > max_level:
+            story.append(Paragraph("... (data too deeply nested)", self.normal_style))
+            return
+        
+        if isinstance(data, dict):
+            for key, value in data.items():
+                formatted_key = self._format_key(key)
+                sanitized_key = self._sanitize_text(formatted_key)
+                
+                if isinstance(value, dict):
+                    story.append(Paragraph(f"<b>{sanitized_key}</b>", self.heading_style if level == 0 else self.normal_style))
+                    self._process_data_recursively(value, story, level + 1, max_level)
+                    story.append(Spacer(1, 8 if level == 0 else 4))
+                elif isinstance(value, list):
+                    story.append(Paragraph(f"<b>{sanitized_key}</b>", self.heading_style if level == 0 else self.normal_style))
+                    for i, item in enumerate(value):
+                        if isinstance(item, dict):
+                            story.append(Paragraph(f"Item {i+1}:", self.normal_style))
+                            self._process_data_recursively(item, story, level + 1, max_level)
+                        else:
+                            sanitized_item = self._sanitize_text(item)
+                            story.append(Paragraph(f"• {sanitized_item}", self.normal_style))
+                    story.append(Spacer(1, 8 if level == 0 else 4))
+                else:
+                    sanitized_value = self._sanitize_text(value)
+                    if level == 0:
+                        story.append(Paragraph(f"<b>{sanitized_key}</b>: {sanitized_value}", self.normal_style))
+                    else:
+                        story.append(Paragraph(f"• {sanitized_key}: {sanitized_value}", self.normal_style))
+                    story.append(Spacer(1, 4))
+        elif isinstance(data, list):
+            for i, item in enumerate(data):
+                if isinstance(item, dict):
+                    story.append(Paragraph(f"Item {i+1}:", self.normal_style))
+                    self._process_data_recursively(item, story, level + 1, max_level)
+                else:
+                    sanitized_item = self._sanitize_text(item)
+                    story.append(Paragraph(f"• {sanitized_item}", self.normal_style))
+        else:
+            sanitized_data = self._sanitize_text(data)
+            story.append(Paragraph(sanitized_data, self.normal_style))
+
+    def create_summary_pdf(self, summarized_data, output_path="financial_summary.pdf"):
+        try:
+            doc = SimpleDocTemplate(output_path, pagesize=A4)
+            story = []
+            
+            # Title
+            story.append(Paragraph("Financial Analysis Summary", self.title_style))
+            story.append(Spacer(1, 12))
+            
+            # Add timestamp
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            story.append(Paragraph(f"Generated on: {timestamp}", self.normal_style))
+            story.append(Spacer(1, 20))
+            
+            # Process summarized data recursively
+            self._process_data_recursively(summarized_data, story)
+            
+            doc.build(story)
+            return {"success": True, "file_path": output_path}
+            
+        except Exception as e:
+            return {"success": False, "error": f"PDF generation failed: {str(e)}"}
+        

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import os
 from extractor import extract_text_from_file
@@ -8,7 +8,10 @@ app = Flask(__name__)
 CORS(app)
 
 UPLOAD_FOLDER = "uploads"
+PUBLIC_FOLDER = "public"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(PUBLIC_FOLDER, exist_ok=True)
+os.makedirs(f"{PUBLIC_FOLDER}/pdfs", exist_ok=True)
 
 gemini_extractor = None
 try:
@@ -47,6 +50,26 @@ def evaluate():
             response_data["data"] = {
                 "financial_analysis": financial_analysis
             }
+            
+            # Include PDF information if available
+            if financial_analysis.get("success") and financial_analysis.get("pdf_result"):
+                pdf_result = financial_analysis["pdf_result"]
+                if pdf_result.get("success"):
+                    response_data["pdf"] = {
+                        "available": True,
+                        "filename": os.path.basename(pdf_result["file_path"]),
+                        "url": pdf_result.get("public_url", f"/pdfs/{os.path.basename(pdf_result['file_path'])}")
+                    }
+                else:
+                    response_data["pdf"] = {
+                        "available": False,
+                        "error": pdf_result.get("error", "PDF generation failed")
+                    }
+            else:
+                response_data["pdf"] = {
+                    "available": False,
+                    "error": "No summarized data available for PDF generation"
+                }
         else:
             response_data["success"] = False
             response_data["data"] = {
@@ -54,11 +77,24 @@ def evaluate():
                     "error": "Gemini API not configured. Please set GEMINI_API_KEY environment variable."
                 }
             }
+            response_data["pdf"] = {
+                "available": False,
+                "error": "Gemini API not configured"
+            }
 
         return jsonify(response_data), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/pdfs/<filename>")
+def serve_pdf(filename):
+    """Serve PDF files from the public/pdfs directory"""
+    try:
+        return send_from_directory(f"{PUBLIC_FOLDER}/pdfs", filename, as_attachment=True)
+    except FileNotFoundError:
+        return jsonify({"error": "PDF file not found"}), 404
 
 
 if __name__ == "__main__":
