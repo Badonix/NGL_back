@@ -1,6 +1,6 @@
 # Financial Evaluation API
 
-A simple Flask API for receiving and processing financial documents.
+A Flask API for receiving and processing financial documents with AI-powered analysis using Google Gemini 2.5 Pro.
 
 ## Setup
 
@@ -10,7 +10,17 @@ A simple Flask API for receiving and processing financial documents.
 pip install -r requirements.txt
 ```
 
-2. Run the application:
+2. Configure Gemini API:
+
+Create a `.env` file in the `back/` directory:
+
+```bash
+GEMINI_API_KEY=your_gemini_api_key_here
+```
+
+Get your API key from: https://makersuite.google.com/app/apikey
+
+3. Run the application:
 
 ```bash
 python app.py
@@ -40,19 +50,49 @@ Upload files for financial evaluation.
 
 ```json
 {
-  "status": "approved|conditional|rejected",
-  "confidence": 0.85,
-  "risk_level": "low|medium|high",
-  "recommendation": "Proceed with investment",
-  "estimated_return": "12.5%",
-  "files_processed": 3,
-  "uploaded_files": [
-    {
-      "filename": "document.pdf",
-      "size": 1024000,
-      "type": "pdf"
+  "message": "success",
+  "filename": "document.pdf",
+  "preview": "First 500 characters of extracted text...",
+  "length": 15000,
+  "financial_analysis": {
+    "success": true,
+    "data": {
+      "company_info": {
+        "name": "Example Corp",
+        "industry": "Technology",
+        "description": "Software company"
+      },
+      "financial_metrics": {
+        "revenue": {
+          "current": 1000000,
+          "previous": 800000,
+          "currency": "USD"
+        },
+        "net_income": {
+          "current": 150000,
+          "previous": 120000,
+          "currency": "USD"
+        }
+      },
+      "ratios": {
+        "profit_margin": 0.15,
+        "roe": 0.12
+      },
+      "risk_factors": ["Market competition", "Regulatory changes"],
+      "investment_highlights": ["Strong revenue growth", "Market leadership"]
     }
-  ]
+  },
+  "investment_recommendation": {
+    "success": true,
+    "recommendation": {
+      "recommendation": "Buy",
+      "confidence": "High",
+      "strengths": ["Strong financials", "Growth potential"],
+      "weaknesses": ["Market volatility"],
+      "risk_level": "Medium",
+      "summary": "Strong buy recommendation based on solid fundamentals"
+    }
+  }
 }
 ```
 

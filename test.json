@@ -1,0 +1,242 @@
+{
+  "financial_analysis": {
+    "data": {
+      "additional_financial_data": {
+        "growth_metrics": {
+          "profit_growth": -0.3004,
+          "revenue_growth": 0.0238,
+          "yoy_comparison": "Revenue increased by 2.38%, Profit decreased by 30.04% YoY"
+        },
+        "investment_highlights": [
+          "Leading market position in the Georgian pharmaceutical market.",
+          "Extensive network of pharmacies across Georgia.",
+          "Strong brand recognition and customer loyalty.",
+          "Focus on providing high-quality pharmaceutical products at affordable prices.",
+          "Efforts to improve operational efficiency and customer service.",
+          "Expansion plans for 2024 to open 24 new pharmacies in Tbilisi and other regions."
+        ],
+        "market_data": {
+          "market_cap": {
+            "currency": null,
+            "value": null
+          },
+          "shares_outstanding": null
+        },
+        "ratios": {
+          "current_ratio": 1.85,
+          "debt_to_equity": null,
+          "profit_margin": null,
+          "quick_ratio": 0.54,
+          "roa": null,
+          "roe": null
+        },
+        "risk_factors": [
+          "კანონთან შესაბამისობა (Compliance with laws)",
+          "კადრების გადინება (Personnel turnover)",
+          "სავალუტო და მაკროეკონომიკური რისკები (Exchange rate and macroeconomic risks)",
+          "საკრედიტო და ლიკვიდურობის რისკი (Credit and liquidity risk)"
+        ]
+      },
+      "balance_sheet": {
+        "accounts_payable": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 163061,
+          "georgian_term": "სავაჭრო და სხვა ვალდებულებები",
+          "previous": 186078
+        },
+        "accounts_receivable": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 78674,
+          "georgian_term": "სავაჭრო და სხვა მოთხოვნები",
+          "previous": 36473
+        },
+        "cash_equivalents": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 17623,
+          "georgian_term": "ფული და ფულის ეკვივალენტები",
+          "previous": 48586
+        },
+        "deferred_tax_liabilities": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": null,
+          "extraction_note": "Not explicitly stated in the balance sheet.",
+          "georgian_term": "გადავადებული გადასახადები",
+          "previous": null
+        },
+        "intangible_assets": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 4165,
+          "georgian_term": "არამატერიალური აქტივები",
+          "previous": 2512
+        },
+        "inventory": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 243959,
+          "georgian_term": "მარაგები",
+          "previous": 256002
+        },
+        "long_term_debt": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": null,
+          "extraction_note": "Not explicitly stated in the balance sheet; may be included in 'სხვა გრძელვადიანი ვალდებულებები'.",
+          "georgian_term": "გრძელვადიანი სესხები",
+          "previous": null
+        },
+        "other_current_assets": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": null,
+          "extraction_note": "Cannot isolate this figure from given data.",
+          "georgian_term": "სხვა მიმდინარე აქტივები",
+          "previous": null
+        },
+        "ppe": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 71747,
+          "georgian_term": "ძირითადი საშუალებები",
+          "previous": 67605
+        },
+        "shareholders_equity": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 326417,
+          "georgian_term": "კაპიტალი",
+          "previous": 305119
+        },
+        "short_term_debt": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": null,
+          "extraction_note": "Not explicitly stated in the balance sheet; may be included in 'სავაჭრო და სხვა ვალდებულებები'.",
+          "georgian_term": "მოკლევადიანი სესხები",
+          "previous": null
+        }
+      },
+      "cash_flow_statement": {
+        "capital_expenditures": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": -13084,
+          "georgian_term": "ძირითადი საშუალებების შეძენა",
+          "previous": -9171
+        },
+        "cash_flow_from_operations": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 15748,
+          "georgian_term": "ფულადი ნაკადები საოპერაციო საქმიანობიდან",
+          "previous": 71326
+        },
+        "changes_in_working_capital": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": null,
+          "extraction_note": "Implicit, can derive from BS changes, but explicit number not provided.",
+          "georgian_term": "სამუშაო კაპიტალის ცვლილებები",
+          "previous": null
+        },
+        "free_cash_flow": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": null,
+          "note": "calculated",
+          "previous": null
+        },
+        "interest_paid": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": -6895,
+          "georgian_term": "საიჯარო ვალდებულებაზე გადახდილი პროცენტი",
+          "previous": -8427
+        },
+        "taxes_paid": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": -40093,
+          "georgian_term": "გადახდილი გადასახადები",
+          "previous": -34112
+        }
+      },
+      "company_info": {
+        "description": "კომპანიის ძირითადი საქმიანობა არის ფარმაცევტული პროდუქტებისა და პირადი ჰიგიენის ნივთების საცალო და საბითუმო ვაჭრობა. (The company's main activity is the retail and wholesale of pharmaceutical products and personal hygiene items.)",
+        "industry": "ფარმაცევტული პროდუქტებისა და პირადი ჰიგიენის ნივთების საცალო და საბითუმო ვაჭრობა (Retail and wholesale of pharmaceutical products and personal hygiene items)",
+        "name": "შპს „პსპ ფარმა “ (PSP Pharma LLC)"
+      },
+      "extraction_notes": "Data extracted from the provided document. Some line items were not explicitly provided and are marked as such. Calculations may be needed to complete the financial statement analysis.Currency used is Georgian Lari (GEL) unless otherwise specified.This is the individual financial reporting and some consolidated information about subsidiaries may not be accurately captured. The legal disputes may affect future payments.",
+      "income_statement": {
+        "cogs": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": -529105,
+          "georgian_term": "რეალიზებული პროდუქციის თვითღირებულება",
+          "previous": -523940
+        },
+        "depreciation_amortization": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": null,
+          "extraction_note": "Combined in selling and administrative expenses, not broken out separately in the provided income statement.",
+          "georgian_term": "ამორტიზაცია და ცვეთა",
+          "previous": null
+        },
+        "foreign_exchange_gains_losses": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": -608,
+          "georgian_term": "კურსთაშორის სხვაობიდან მიღებული მოგება/(ზარალი) , წმინდა",
+          "previous": 6173
+        },
+        "gross_profit": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 170970,
+          "note": "calculated",
+          "previous": 159855
+        },
+        "income_tax_expense": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": null,
+          "extraction_note": "Implicit, since deferred tax is mentioned but not quantified, assuming this is low due to tax model.",
+          "georgian_term": "მოგების გადასახადი",
+          "previous": null
+        },
+        "interest_expense": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": -8078,
+          "georgian_term": "ფინანსური ხარჯი",
+          "previous": -8768
+        },
+        "interest_income": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 4562,
+          "georgian_term": "ფინანსური შემოსავალი",
+          "previous": 16706
+        },
+        "net_income": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 35964,
+          "georgian_term": "წლის სრული შემოსავალი",
+          "previous": 51407
+        },
+        "operating_expenses": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": -143983,
+          "georgian_term": "გაყიდვის დანახარჯები + საერთო და ადმინისტრაციული ხარჯები",
+          "previous": -131218
+        },
+        "operating_profit_ebit": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 34473,
+          "georgian_term": "საოპერაციო მოგება",
+          "previous": 29798
+        },
+        "other_operating_income_expense": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 7486,
+          "georgian_term": "სხვა შემოსავალი",
+          "previous": 1161
+        },
+        "profit_before_tax_ebt": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": null,
+          "extraction_note": "Could not extract due to other income/loss items. Should be calculated based on available line items",
+          "georgian_term": "მოგება გადასახადამდე",
+          "previous": null
+        },
+        "revenue_sales": {
+          "currency": "ათას ლარში (Thousands of GEL)",
+          "current": 700075,
+          "georgian_term": "ამონაგები",
+          "previous": 683795
+        }
+      }
+    }
+  }
+}
