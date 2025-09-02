@@ -14,6 +14,12 @@ class GeminiFinancialExtractor:
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
         
+        # Configure generation parameters to prevent truncation
+        self.generation_config = {
+            "max_output_tokens": 8192,  # Increase max tokens to prevent truncation
+            "temperature": 0.1,  # Lower temperature for more consistent JSON output
+        }
+        
         self.financial_prompt = """
 You are a financial data extraction expert specializing in Georgian financial statements. Analyze the provided document and extract the specific financial line items listed below in a structured JSON format.
 
@@ -55,81 +61,50 @@ You are a financial data extraction expert specializing in Georgian financial st
 - Changes in Working Capital (სამუშაო კაპიტალის ცვლილებები)
 - Free Cash Flow/FCF (calculated)
 
-**ADDITIONAL EXTRACTION - Also extract any other financial data you find:**
-- Company information (name, industry, business description)
-- Additional financial metrics and ratios
-- Growth metrics and year-over-year comparisons
-- Risk factors and investment highlights
-- Market data and competitive information
-- Any other relevant financial information
-
 Please provide the response in the following JSON structure:
-{
-  "company_info": {
-    "name": "string",
-    "industry": "string",
-    "description": "string"
-  },
-  "income_statement": {
-    "revenue_sales": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "შემოსავალი რეალიზაციიდან"},
-    "cogs": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "რეალიზებული პროდუქციის თვითღირებულება"},
-    "gross_profit": {"current": "number", "previous": "number", "currency": "string", "note": "calculated"},
-    "operating_expenses": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "საოპერაციო ხარჯები / გაყიდვების & ადმინისტრაციული ხარჯები"},
-    "depreciation_amortization": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "ამორტიზაცია და ცვეთა"},
-    "other_operating_income_expense": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "სხვა საოპერაციო შემოსავლები/ხარჯები"},
-    "operating_profit_ebit": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "საოპერაციო მოგება"},
-    "interest_expense": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "საპროცენტო ხარჯები"},
-    "interest_income": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "საპროცენტო შემოსავლები"},
-    "foreign_exchange_gains_losses": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "კურსთაშორისი სხვაობები"},
-    "profit_before_tax_ebt": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "მოგება გადასახადამდე"},
-    "income_tax_expense": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "მოგების გადასახადი"},
-    "net_income": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "წმინდა მოგება"}
-  },
-  "balance_sheet": {
-    "cash_equivalents": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "ფულადი სახსრები"},
-    "accounts_receivable": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "ვალდებულებები დებიტორებისგან"},
-    "inventory": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "მარაგები"},
-    "other_current_assets": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "სხვა მიმდინარე აქტივები"},
-    "ppe": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "ქონება, მცენარეები და ტექნიკა"},
-    "intangible_assets": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "არამატერიალური აქტივები"},
-    "accounts_payable": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "ვალდებულებები მომწოდებლების მიმართ"},
-    "short_term_debt": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "მოკლევადიანი სესხები"},
-    "long_term_debt": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "გრძელვადიანი სესხები"},
-    "deferred_tax_liabilities": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "გადავადებული გადასახადები"},
-    "shareholders_equity": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "კაპიტალი"}
-  },
-  "cash_flow_statement": {
-    "cash_flow_from_operations": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "საოპერაციო საქმიანობიდან მიღებული ფულადი ნაკადები"},
-    "taxes_paid": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "გადახდილი მოგების გადასახადი"},
-    "interest_paid": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "გადახდილი საპროცენტო ხარჯები"},
-    "capital_expenditures": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "ინვესტიციები ქონებაში, მცენარეებში, ტექნიკაში"},
-    "changes_in_working_capital": {"current": "number", "previous": "number", "currency": "string", "georgian_term": "სამუშაო კაპიტალის ცვლილებები"},
-    "free_cash_flow": {"current": "number", "previous": "number", "currency": "string", "note": "calculated"}
-  },
-  "additional_financial_data": {
-    "ratios": {
-      "profit_margin": "number",
-      "roe": "number",
-      "roa": "number",
-      "debt_to_equity": "number",
-      "current_ratio": "number",
-      "pe_ratio": "number"
-    },
-    "growth_metrics": {
-      "revenue_growth": "number",
-      "profit_growth": "number",
-      "yoy_comparison": "string"
-    },
-    "risk_factors": ["string"],
-    "investment_highlights": ["string"],
-    "market_data": {
-      "market_cap": {"value": "number", "currency": "string"},
-      "shares_outstanding": "number"
-    }
-  },
-  "extraction_notes": "string"
 
-If any information is not available, use null for that field. Be precise with numbers and include currency information when available. Focus on extracting quantitative data and key qualitative insights that would be valuable for investment analysis.
+{
+  "financial_analysis": {
+    "income_statement": {
+      "revenue_sales": {"2022": "number", "2023": "number"},
+      "cogs": {"2022": "number", "2023": "number"},
+      "gross_profit": {"2022": "number", "2023": "number", "note": "calculated"},
+      "operating_expenses": {"2022": "number", "2023": "number"},
+      "depreciation_amortization": {"2022": "number", "2023": "number"},
+      "other_operating_income_expense": {"2022": "number", "2023": "number"},
+      "operating_profit_ebit": {"2022": "number", "2023": "number"},
+      "interest_expense": {"2022": "number", "2023": "number"},
+      "interest_income": {"2022": "number", "2023": "number"},
+      "foreign_exchange_gains_losses": {"2022": "number", "2023": "number"},
+      "profit_before_tax_ebt": {"2022": "number", "2023": "number"},
+      "income_tax_expense": {"2022": "number", "2023": "number"},
+      "net_income": {"2022": "number", "2023": "number"}
+    },
+    "balance_sheet": {
+      "cash_equivalents": {"2022": "number", "2023": "number"},
+      "accounts_receivable": {"2022": "number", "2023": "number"},
+      "inventory": {"2022": "number", "2023": "number"},
+      "other_current_assets": {"2022": "number", "2023": "number"},
+      "ppe": {"2022": "number", "2023": "number"},
+      "intangible_assets": {"2022": "number", "2023": "number"},
+      "accounts_payable": {"2022": "number", "2023": "number"},
+      "short_term_debt": {"2022": "number", "2023": "number"},
+      "long_term_debt": {"2022": "number", "2023": "number"},
+      "deferred_tax_liabilities": {"2022": "number", "2023": "number"},
+      "shareholders_equity": {"2022": "number", "2023": "number"}
+    },
+    "cash_flow_statement": {
+      "cash_flow_from_operations": {"2022": "number", "2023": "number"},
+      "taxes_paid": {"2022": "number", "2023": "number"},
+      "interest_paid": {"2022": "number", "2023": "number"},
+      "capital_expenditures": {"2022": "number", "2023": "number"},
+      "changes_in_working_capital": {"2022": "number", "2023": "number"},
+      "free_cash_flow": {"2022": "number", "2023": "number", "note": "calculated"}
+    }
+  }
+}
+
+**IMPORTANT:** Extract data for ALL available years found in the document, not just the example years shown above. Use the actual years from the financial statements (e.g., 2019, 2020, 2021, 2022, 2023, 2024, etc.). If any information is not available for a specific year, use null for that field. Include extraction_notes for any items that could not be found or extracted. Be precise with numbers and focus on extracting quantitative data that would be valuable for investment analysis.
 
 Document content to analyze:
 """
@@ -138,7 +113,7 @@ Document content to analyze:
         try:
             full_prompt = self.financial_prompt + document_text
             
-            response = self.model.generate_content(full_prompt)
+            response = self.model.generate_content(full_prompt, generation_config=self.generation_config)
             
             if not response.text:
                 raise ValueError("No response generated from Gemini")
@@ -161,17 +136,61 @@ Document content to analyze:
                 # Clean up escaped newlines and other escape sequences
                 json_text = json_text.replace('\\n', '\n').replace('\\"', '"')
                 
+                # Check if JSON appears to be truncated (doesn't end with proper closing braces)
+                if not json_text.rstrip().endswith('}'):
+                    # Try to find the last complete object and truncate there
+                    last_brace = json_text.rfind('}')
+                    if last_brace > 0:
+                        # Find the matching opening brace
+                        brace_count = 0
+                        for i in range(last_brace, -1, -1):
+                            if json_text[i] == '}':
+                                brace_count += 1
+                            elif json_text[i] == '{':
+                                brace_count -= 1
+                                if brace_count == 0:
+                                    json_text = json_text[:i+1] + '}'
+                                    break
+                
                 financial_data = json.loads(json_text)
                 return {
                     "success": True,
                     "data": financial_data,
-                    "raw_response": response.text
                 }
             except json.JSONDecodeError as e:
+                # If JSON parsing still fails, try to extract partial data
+                try:
+                    # Look for the financial_analysis section specifically
+                    if '"financial_analysis"' in json_text:
+                        start_idx = json_text.find('"financial_analysis"')
+                        # Find the opening brace after financial_analysis
+                        brace_start = json_text.find('{', start_idx)
+                        if brace_start > 0:
+                            # Try to find a complete financial_analysis object
+                            brace_count = 0
+                            end_idx = -1
+                            for i in range(brace_start, len(json_text)):
+                                if json_text[i] == '{':
+                                    brace_count += 1
+                                elif json_text[i] == '}':
+                                    brace_count -= 1
+                                    if brace_count == 0:
+                                        end_idx = i
+                                        break
+                            
+                            if end_idx > 0:
+                                partial_json = json_text[brace_start:end_idx+1]
+                                financial_data = json.loads(partial_json)
+                                return {
+                                    "success": True,
+                                    "data": {"financial_analysis": financial_data},
+                                }
+                except:
+                    pass
+                
                 return {
                     "success": False,
                     "error": f"Failed to parse JSON response from Gemini: {str(e)}",
-                    "raw_response": response.text
                 }
                 
         except Exception as e:
@@ -181,73 +200,3 @@ Document content to analyze:
                 "raw_response": None
             }
     
-    def get_investment_recommendation(self, financial_data):
-        if not financial_data.get("success"):
-            return {"error": "Cannot generate recommendation without valid financial data"}
-        
-        recommendation_prompt = f"""
-Based on the following extracted financial data, provide an investment recommendation and analysis:
-
-{json.dumps(financial_data.get('data', {}), indent=2)}
-
-Please provide:
-1. Overall investment recommendation (Buy/Hold/Sell)
-2. Key strengths and weaknesses
-3. Risk assessment (Low/Medium/High)
-4. Price target or valuation range (if possible)
-5. Key factors to monitor
-
-Format as JSON:
-{{
-  "recommendation": "Buy/Hold/Sell",
-  "confidence": "High/Medium/Low",
-  "strengths": ["string"],
-  "weaknesses": ["string"],
-  "risk_level": "Low/Medium/High",
-  "price_target": "string",
-  "key_monitors": ["string"],
-  "summary": "string"
-}}
-"""
-        
-        try:
-            response = self.model.generate_content(recommendation_prompt)
-            
-            if not response.text:
-                raise ValueError("No recommendation response generated")
-            
-            try:
-                # Extract JSON from markdown code blocks if present
-                response_text = response.text.strip()
-                
-                # Check if response is wrapped in markdown code blocks
-                if response_text.startswith("```json") and response_text.endswith("```"):
-                    # Remove the markdown code block markers
-                    json_text = response_text[7:-3].strip()  # Remove ```json and ```
-                elif response_text.startswith("```") and response_text.endswith("```"):
-                    # Handle generic code blocks
-                    json_text = response_text[3:-3].strip()  # Remove ``` and ```
-                else:
-                    # Use the response as-is
-                    json_text = response_text
-                
-                # Clean up escaped newlines and other escape sequences
-                json_text = json_text.replace('\\n', '\n').replace('\\"', '"')
-                
-                recommendation = json.loads(json_text)
-                return {
-                    "success": True,
-                    "recommendation": recommendation
-                }
-            except json.JSONDecodeError as e:
-                return {
-                    "success": False,
-                    "error": f"Failed to parse recommendation JSON: {str(e)}",
-                    "raw_response": response.text
-                }
-                
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Recommendation generation error: {str(e)}"
-            }

@@ -36,17 +36,12 @@ def evaluate():
         response_data = {
             "message": "success",
             "filename": file.filename,
-            "preview": preview,
             "length": len(extracted_text),
         }
 
         if gemini_extractor:
             financial_analysis = gemini_extractor.extract_financial_data(extracted_text)
             response_data["financial_analysis"] = financial_analysis
-            
-            if financial_analysis.get("success"):
-                recommendation = gemini_extractor.get_investment_recommendation(financial_analysis)
-                response_data["investment_recommendation"] = recommendation
         else:
             response_data["financial_analysis"] = {
                 "success": False,
