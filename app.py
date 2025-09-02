@@ -1,51 +1,41 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 import os
-import re
-import uuid
+from extractor import extract_text_from_file   # <-- we use your extractor
 
 app = Flask(__name__)
-CORS(app)
 
-UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'pdf', 'xlsx', 'xls', 'docx', 'doc'}
-MAX_FILE_SIZE = 16 * 1024 * 1024
-
+UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
+@app.route("/evaluate", methods=["POST"])
+def evaluate():
+    if "files" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
 
-def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    file = request.files["files"]
 
-def sanitize_filename(filename):
-    name, ext = os.path.splitext(filename)
-    name = re.sub(r'[<>:"/\\|?*]', '_', name)
-    return name + ext
+    if file.filename == "":
+        return jsonify({"error": "Empty filename"}), 400
 
-@app.route('/evaluate', methods=['POST'])
-def evaluate_financial_project():
-    if 'files' not in request.files:
-        return jsonify({'error': 'No files provided'}), 400
-    
-    files = request.files.getlist('files')
-    
-    if not files or all(file.filename == '' for file in files):
-        return jsonify({'error': 'No files selected'}), 400
-    
-    for file in files:
-        if file and allowed_file(file.filename):
-            filename = sanitize_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-    
-    return jsonify({'message': 'success'}), 200
+    filepath = os.path.join(UPLOAD_FOLDER, file.filename)
+    file.save(filepath)
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({'status': 'healthy'}), 200
+    try:
+        extracted_text = extract_text_from_file(filepath)
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+        # For debugging – return a preview (first 500 chars only)
+        preview = extracted_text[:500] if extracted_text else ""
+
+        return jsonify({
+            "message": "success",
+            "filename": file.filename,
+            "preview": preview,
+            "length": len(extracted_text)
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)
