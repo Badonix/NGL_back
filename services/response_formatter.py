@@ -16,12 +16,16 @@ class ResponseFormatter:
         return jsonify(response), 200
     
     @staticmethod
-    def format_evaluation_response(filename, text_length, financial_analysis, pdf_result=None):
+    def format_evaluation_response(filename, text_length, financial_analysis, pdf_result=None, file_count=1, processed_files=None):
         response_data = {
             "message": "success",
             "filename": filename,
             "length": text_length,
+            "file_count": file_count,
         }
+        
+        if processed_files:
+            response_data["processed_files"] = processed_files
         
         if financial_analysis and financial_analysis.get("success"):
             response_data["success"] = True

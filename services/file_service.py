@@ -4,7 +4,7 @@ from config import Config
 from .error_handler import ErrorHandler
 
 class FileService:
-    ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.txt'}
+    ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".pdf", ".docx", ".doc", ".txt"}
     
     @classmethod
     def validate_file(cls, file):
