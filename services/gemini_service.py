@@ -60,7 +60,13 @@ class GeminiFinancialExtractor:
             if not json_text.rstrip().endswith('}'):
                 json_text = self._fix_truncated_json(json_text)
             
-            return json.loads(json_text)
+            parsed_data = json.loads(json_text)
+            
+            # Convert string numbers to actual numbers in financial analysis
+            if 'financial_analysis' in parsed_data:
+                parsed_data['financial_analysis'] = self._convert_string_numbers(parsed_data['financial_analysis'])
+            
+            return parsed_data
             
         except json.JSONDecodeError as e:
             partial_data = self._extract_partial_data(json_text)
@@ -68,6 +74,30 @@ class GeminiFinancialExtractor:
                 return partial_data
             
             raise ValueError(f"Failed to parse JSON response from Gemini: {str(e)}")
+    
+    def _convert_string_numbers(self, data):
+        """Convert string numbers to actual numbers in the financial data structure"""
+        if isinstance(data, dict):
+            converted = {}
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    converted[key] = self._convert_string_numbers(value)
+                elif isinstance(value, str):
+                    # Handle various string number formats
+                    if value == "null" or value == "None" or value == "":
+                        converted[key] = None
+                    elif value.isdigit():
+                        converted[key] = int(value)
+                    elif value.replace('.', '').replace('-', '').replace(',', '').isdigit():
+                        # Remove commas and convert to float
+                        clean_value = value.replace(',', '')
+                        converted[key] = float(clean_value)
+                    else:
+                        converted[key] = value
+                else:
+                    converted[key] = value
+            return converted
+        return data
     
     def _fix_truncated_json(self, json_text):
         last_brace = json_text.rfind('}')
