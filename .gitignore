@@ -1,5 +1,6 @@
 # Uploads folder
 uploads/
+public/pdfs/
 
 # Python
 __pycache__/
