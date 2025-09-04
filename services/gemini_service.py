@@ -634,22 +634,35 @@ Evaluate the completeness and quality across these key investment decision areas
    - Innovation and R&D capabilities
    - Market opportunity and addressable market
 
-Rate the overall sufficiency considering that institutional-quality investment decisions typically require 80%+ data completeness.
+**CRITICAL INVESTMENT ASSESSMENT LOGIC:**
+
+1. **If the business fundamentals are sound** but data is missing:
+   - Rate based on data completeness (0-100%)
+   - Focus on what additional data is needed
+   - Provide recommendations for data gathering
+
+2. **If the business fundamentals are flawed** (poor business model, declining metrics, insurmountable risks):
+   - Set sufficiency_percentage to 0
+   - In missing_data, state "INVESTMENT NOT RECOMMENDED - Business fundamentals are flawed"
+   - In recommendations, explain why this is not a viable investment
+   - In critical_gaps, list the fundamental business problems
+
+Rate the overall sufficiency considering that institutional-quality investment decisions typically require 80%+ data completeness, BUT if the business itself is fundamentally flawed, return 0% regardless of data completeness.
 
 Provide your response in this exact JSON format:
 
 {
     "sufficiency_percentage": <number 0-100>,
     "missing_data": [
-        "Specific missing data point 1",
+        "Specific missing data point 1 OR 'INVESTMENT NOT RECOMMENDED - Business fundamentals are flawed'",
         "Specific missing data point 2"
     ],
     "recommendations": [
-        "Specific actionable recommendation 1",
+        "Specific actionable recommendation 1 OR reasons why investment should be avoided",
         "Specific actionable recommendation 2"
     ],
     "critical_gaps": [
-        "Critical gap 1 that prevents investment decision",
+        "Critical gap 1 that prevents investment decision OR fundamental business flaw",
         "Critical gap 2 that significantly impacts risk assessment"
     ]
 }
@@ -666,27 +679,45 @@ Investment data to analyze:
 """
     
     def _parse_sufficiency_response(self, response_text):
-        """Parse sufficiency check response from Gemini"""
+        """Parse sufficiency check response from Gemini with enhanced error handling"""
         try:
             response_text = response_text.strip()
             
-            # Try to extract JSON content
+            # Try multiple extraction methods
+            json_text = None
+            
+            # Method 1: Standard JSON extraction
             json_text = self._extract_json_content(response_text)
             
+            # Method 2: If that fails, try to find JSON boundaries more aggressively
+            if not json_text or len(json_text.strip()) < 10:
+                # Look for any { } pair
+                start_brace = response_text.find('{')
+                end_brace = response_text.rfind('}')
+                if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+                    json_text = response_text[start_brace:end_brace + 1]
+            
             if not json_text:
-                # Fallback with default values
-                return {
-                    "sufficiency_percentage": 50,
-                    "missing_data": ["Unable to parse specific missing data"],
-                    "recommendations": [response_text[:200] + "..." if len(response_text) > 200 else response_text],
-                    "critical_gaps": ["Response parsing error"]
-                }
+                # Method 3: Extract from markdown code blocks more aggressively
+                import re
+                # Look for any content between ``` blocks
+                code_blocks = re.findall(r'```(?:json)?\s*({.*?})\s*```', response_text, re.DOTALL | re.IGNORECASE)
+                if code_blocks:
+                    json_text = code_blocks[0]
             
-            # Clean and parse JSON
-            json_text = json_text.replace('\\n', '\n').replace('\\"', '"')
-            json_text = self._fix_common_json_issues(json_text)
+            if not json_text:
+                # Fallback: try to extract key information manually
+                return self._extract_sufficiency_manually(response_text)
             
-            parsed_data = json.loads(json_text)
+            # Clean and parse JSON with enhanced cleaning
+            json_text = self._clean_json_for_parsing(json_text)
+            
+            try:
+                parsed_data = json.loads(json_text)
+            except json.JSONDecodeError:
+                # Try one more cleaning pass
+                json_text = self._aggressive_json_cleaning(json_text)
+                parsed_data = json.loads(json_text)
             
             # Ensure all required fields exist with defaults
             return {
@@ -735,3 +766,83 @@ Investment data to analyze:
                 "recommendations": ["Please try again"],
                 "critical_gaps": ["System error occurred"]
             }
+    
+    def _clean_json_for_parsing(self, json_text):
+        """Enhanced JSON cleaning for parsing"""
+        # Remove any leading/trailing whitespace
+        json_text = json_text.strip()
+        
+        # Remove any markdown formatting
+        if json_text.startswith('```') and json_text.endswith('```'):
+            json_text = json_text[3:-3].strip()
+            
+        if json_text.startswith('json'):
+            json_text = json_text[4:].strip()
+        
+        # Apply existing cleaning
+        json_text = self._fix_common_json_issues(json_text)
+        
+        return json_text
+    
+    def _aggressive_json_cleaning(self, json_text):
+        """More aggressive JSON cleaning as last resort"""
+        import re
+        
+        # Remove any text before the first {
+        first_brace = json_text.find('{')
+        if first_brace > 0:
+            json_text = json_text[first_brace:]
+        
+        # Remove any text after the last }
+        last_brace = json_text.rfind('}')
+        if last_brace != -1:
+            json_text = json_text[:last_brace + 1]
+        
+        # Fix common issues
+        json_text = re.sub(r',(\s*[}\]])', r'\1', json_text)  # Remove trailing commas
+        json_text = re.sub(r'([}\]])(\s*)(["\w])', r'\1,\2\3', json_text)  # Add missing commas
+        
+        return json_text
+    
+    def _extract_sufficiency_manually(self, response_text):
+        """Manual extraction when JSON parsing completely fails"""
+        import re
+        
+        # Try to extract percentage
+        percentage_patterns = [
+            r'sufficiency_percentage["\s]*:\s*(\d+)',
+            r'percentage["\s]*:\s*(\d+)',
+            r'(\d+)%',
+            r'(\d+)\s*percent'
+        ]
+        
+        percentage = 40  # Default
+        for pattern in percentage_patterns:
+            match = re.search(pattern, response_text, re.IGNORECASE)
+            if match:
+                percentage = int(match.group(1))
+                break
+        
+        # Detect investment negative signals
+        negative_signals = [
+            'shit', 'terrible', 'awful', 'horrible', 'not viable', 'fundamentally flawed',
+            'should not invest', 'avoid investment', 'not recommended', 'poor business model',
+            'declining', 'unsustainable', 'high risk', 'unprofitable'
+        ]
+        
+        is_negative = any(signal in response_text.lower() for signal in negative_signals)
+        
+        if is_negative or percentage == 0:
+            return {
+                "sufficiency_percentage": 0,
+                "missing_data": ["INVESTMENT NOT RECOMMENDED - Business fundamentals are flawed"],
+                "recommendations": ["Avoid this investment opportunity due to fundamental business issues"],
+                "critical_gaps": ["Poor business model or fundamentally flawed investment opportunity"]
+            }
+        
+        return {
+            "sufficiency_percentage": percentage,
+            "missing_data": ["Complete response could not be parsed - manual review recommended"],
+            "recommendations": ["Request additional data and re-run analysis"],
+            "critical_gaps": ["Response parsing incomplete"]
+        }
