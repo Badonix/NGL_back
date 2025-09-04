@@ -5,6 +5,7 @@ from config import Config
 from routes.evaluation import evaluation_bp
 from routes.pdf import pdf_bp
 from routes.valuation import valuation_bp
+from routes.investment import investment_bp
 
 def create_app():
     app = Flask(__name__)
@@ -21,6 +22,7 @@ def create_app():
     app.register_blueprint(evaluation_bp)
     app.register_blueprint(pdf_bp)
     app.register_blueprint(valuation_bp)
+    app.register_blueprint(investment_bp)
     
     @app.route("/health")
     def health_check():

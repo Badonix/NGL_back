@@ -29,9 +29,11 @@ class ResponseFormatter:
         
         if financial_analysis and financial_analysis.get("success"):
             response_data["success"] = True
+            # Extract the full data including summerized_data
+            full_data = financial_analysis.get("data", financial_analysis)
             response_data["data"] = {
                 "financial_analysis": {
-                    "data": financial_analysis.get("data", financial_analysis),
+                    "data": full_data,
                     "success": True
                 }
             }
@@ -53,6 +55,79 @@ class ResponseFormatter:
             response_data["pdf"] = {
                 "available": False,
                 "error": "Analysis failed"
+            }
+        
+        return jsonify(response_data), 200
+    
+    @staticmethod
+    def format_investment_response(filename, text_length, investment_analysis, file_count=1, processed_files=None):
+        response_data = {
+            "message": "success",
+            "filename": filename,
+            "length": text_length,
+            "file_count": file_count,
+        }
+        
+        if processed_files:
+            response_data["processed_files"] = processed_files
+        
+        if investment_analysis and investment_analysis.get("success"):
+            response_data["success"] = True
+            response_data["data"] = {
+                "investment_analysis": {
+                    "data": investment_analysis.get("data", investment_analysis),
+                    "success": True
+                }
+            }
+        else:
+            response_data["success"] = False
+            error_message = "Gemini API not configured. Please set GEMINI_API_KEY environment variable."
+            if investment_analysis and investment_analysis.get("error"):
+                error_message = investment_analysis["error"]
+            
+            response_data["data"] = {
+                "investment_analysis": {
+                    "error": error_message
+                }
+            }
+        
+        return jsonify(response_data), 200
+    
+    @staticmethod
+    def format_sufficiency_response(sufficiency_result):
+        if sufficiency_result.get("success"):
+            response_data = {
+                "success": True,
+                "message": "Sufficiency check completed",
+                "data": {
+                    "sufficiency_percentage": sufficiency_result.get("sufficiency_percentage", 0),
+                    "missing_data": sufficiency_result.get("missing_data", []),
+                    "recommendations": sufficiency_result.get("recommendations", []),
+                    "critical_gaps": sufficiency_result.get("critical_gaps", [])
+                }
+            }
+        else:
+            response_data = {
+                "success": False,
+                "message": "Sufficiency check failed",
+                "error": sufficiency_result.get("error", "Unknown error occurred")
+            }
+        
+        return jsonify(response_data), 200
+    
+    @staticmethod
+    def format_validity_response(validity_result):
+        if validity_result.get("success"):
+            response_data = {
+                "success": True,
+                "message": "Investment validity calculation completed",
+                "data": validity_result.get("data", {})
+            }
+        else:
+            response_data = {
+                "success": False,
+                "message": "Investment validity calculation failed",
+                "error": validity_result.get("error", "Unknown error occurred")
             }
         
         return jsonify(response_data), 200
