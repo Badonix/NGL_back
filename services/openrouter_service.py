@@ -2,139 +2,124 @@ import requests
 import json
 from config import Config
 
+
 class OpenRouterService:
     def __init__(self):
         if not Config.OPENROUTER_API_KEY:
             raise ValueError("OPENROUTER_API_KEY environment variable is required")
-        
+
         self.api_key = Config.OPENROUTER_API_KEY
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
         self.model = "meta-llama/llama-4-maverick"
-        
+
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "http://localhost:5000",
-            "X-Title": "NGL Financial Analyzer"
+            "X-Title": "NGL Financial Analyzer",
         }
-    
-    def check_investment_sufficiency(self, valuation_data, financial_data, investment_data):
-        """
-        Check how sufficient the investment data is by combining valuation, financial, and investment data
-        Returns percentage and notes about what's missing
-        """
+
+    def check_investment_sufficiency(
+        self, valuation_data, financial_data, investment_data
+    ):
         try:
-            prompt = self._build_sufficiency_prompt(valuation_data, financial_data, investment_data)
-            
+            prompt = self._build_sufficiency_prompt(
+                valuation_data, financial_data, investment_data
+            )
+
             payload = {
                 "model": self.model,
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a professional investment analyst. Your task is to evaluate the sufficiency of investment data and provide a percentage score along with specific recommendations for missing information."
+                        "content": "You are a professional investment analyst. Your task is to evaluate the sufficiency of investment data and provide a percentage score along with specific recommendations for missing information.",
                     },
-                    {
-                        "role": "user", 
-                        "content": prompt
-                    }
+                    {"role": "user", "content": prompt},
                 ],
                 "max_tokens": 1000,
-                "temperature": 0.3
+                "temperature": 0.3,
             }
-            
-            response = requests.post(self.base_url, headers=self.headers, json=payload, timeout=30)
+
+            response = requests.post(
+                self.base_url, headers=self.headers, json=payload, timeout=30
+            )
             response.raise_for_status()
-            
+
             result = response.json()
-            content = result['choices'][0]['message']['content']
-            
+            content = result["choices"][0]["message"]["content"]
+
             return self._parse_sufficiency_response(content)
-            
+
         except requests.exceptions.RequestException as e:
-            return {
-                "success": False,
-                "error": f"OpenRouter API error: {str(e)}"
-            }
+            return {"success": False, "error": f"OpenRouter API error: {str(e)}"}
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"Unexpected error: {str(e)}"
-            }
-    
+            return {"success": False, "error": f"Unexpected error: {str(e)}"}
+
     def check_investment_sufficiency_simple(self, combined_text):
-        """
-        Simple sufficiency check using only the combined text (files + manual input)
-        """
         try:
             prompt = self._build_simple_sufficiency_prompt(combined_text)
-            
+
             payload = {
                 "model": self.model,
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a professional investment analyst. Analyze the provided investment data and rate its sufficiency for making investment decisions. Provide a percentage score and specific recommendations."
+                        "content": "You are a professional investment analyst. Analyze the provided investment data and rate its sufficiency for making investment decisions. Provide a percentage score and specific recommendations.",
                     },
-                    {
-                        "role": "user", 
-                        "content": prompt
-                    }
+                    {"role": "user", "content": prompt},
                 ],
                 "max_tokens": 800,
-                "temperature": 0.3
+                "temperature": 0.3,
             }
-            
-            response = requests.post(self.base_url, headers=self.headers, json=payload, timeout=30)
+
+            response = requests.post(
+                self.base_url, headers=self.headers, json=payload, timeout=30
+            )
             response.raise_for_status()
-            
+
             result = response.json()
-            content = result['choices'][0]['message']['content']
-            
+            content = result["choices"][0]["message"]["content"]
+
             return self._parse_sufficiency_response(content)
-            
+
         except requests.exceptions.RequestException as e:
-            return {
-                "success": False,
-                "error": f"OpenRouter API error: {str(e)}"
-            }
+            return {"success": False, "error": f"OpenRouter API error: {str(e)}"}
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"Unexpected error: {str(e)}"
-            }
-    
-    def _build_sufficiency_prompt(self, valuation_data, financial_data, investment_data):
-        """Build the prompt for sufficiency checking"""
-        
+            return {"success": False, "error": f"Unexpected error: {str(e)}"}
+
+    def _build_sufficiency_prompt(
+        self, valuation_data, financial_data, investment_data
+    ):
+
         prompt = """
 You are analyzing investment data sufficiency for a comprehensive investment decision. Please evaluate the completeness and quality of the provided data.
 
 **VALUATION DATA:**
 """
-        
+
         if valuation_data:
             prompt += f"\n{json.dumps(valuation_data, indent=2)}\n"
         else:
             prompt += "\nNo valuation data provided.\n"
-        
+
         prompt += """
 **FINANCIAL ANALYSIS DATA:**
 """
-        
+
         if financial_data:
             prompt += f"\n{json.dumps(financial_data, indent=2)}\n"
         else:
             prompt += "\nNo financial analysis data provided.\n"
-        
+
         prompt += """
 **INVESTMENT RESEARCH DATA:**
 """
-        
+
         if investment_data:
             prompt += f"\n{json.dumps(investment_data, indent=2)}\n"
         else:
             prompt += "\nNo additional investment data provided.\n"
-        
+
         prompt += """
 
 **TASK:**
@@ -172,28 +157,30 @@ Provide your response in this exact JSON format:
 
 Be precise and specific in your assessment. The percentage should reflect how complete the data is for making a sound investment decision.
 """
-        
+
         return prompt
-    
+
     def _parse_sufficiency_response(self, response_text):
         """Parse the LLaMA response and extract percentage and notes"""
         try:
             response_text = response_text.strip()
-            
+
             # Try to find JSON content
             if "{" in response_text and "}" in response_text:
                 start_index = response_text.find("{")
                 end_index = response_text.rfind("}") + 1
                 json_content = response_text[start_index:end_index]
-                
+
                 parsed_data = json.loads(json_content)
-                
+
                 return {
                     "success": True,
-                    "sufficiency_percentage": parsed_data.get("sufficiency_percentage", 50),
+                    "sufficiency_percentage": parsed_data.get(
+                        "sufficiency_percentage", 50
+                    ),
                     "missing_data": parsed_data.get("missing_data", []),
                     "recommendations": parsed_data.get("recommendations", []),
-                    "critical_gaps": parsed_data.get("critical_gaps", [])
+                    "critical_gaps": parsed_data.get("critical_gaps", []),
                 }
             else:
                 # Fallback if no JSON structure found
@@ -201,27 +188,30 @@ Be precise and specific in your assessment. The percentage should reflect how co
                     "success": True,
                     "sufficiency_percentage": 50,
                     "missing_data": ["Unable to parse specific missing data"],
-                    "recommendations": [response_text[:200] + "..." if len(response_text) > 200 else response_text],
-                    "critical_gaps": ["Response parsing error"]
+                    "recommendations": [
+                        (
+                            response_text[:200] + "..."
+                            if len(response_text) > 200
+                            else response_text
+                        )
+                    ],
+                    "critical_gaps": ["Response parsing error"],
                 }
-                
+
         except json.JSONDecodeError as e:
             return {
                 "success": True,
                 "sufficiency_percentage": 40,
                 "missing_data": ["JSON parsing error in response"],
                 "recommendations": [f"Raw response: {response_text[:200]}..."],
-                "critical_gaps": ["Model response format error"]
+                "critical_gaps": ["Model response format error"],
             }
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"Error parsing response: {str(e)}"
-            }
-    
+            return {"success": False, "error": f"Error parsing response: {str(e)}"}
+
     def _build_simple_sufficiency_prompt(self, combined_text):
         """Build a simple prompt for sufficiency checking using combined text"""
-        
+
         prompt = f"""
 You are analyzing investment data for sufficiency and completeness. Please evaluate how complete this data is for making sound investment decisions.
 
@@ -264,10 +254,12 @@ Provide your response in this exact JSON format:
 
 Be specific and actionable in your assessment. Focus on what investment information is missing that would be crucial for making a sound investment decision.
 """
-        
+
         return prompt
-    
-    def calculate_investment_validity(self, financial_data, valuation_data, investment_data):
+
+    def calculate_investment_validity(
+        self, financial_data, valuation_data, investment_data
+    ):
         """
         Calculate investment validity using 5 AI models + final aggregation
         """
@@ -278,52 +270,60 @@ Be specific and actionable in your assessment. Focus on what investment informat
                 {"name": "meta-llama/llama-3.3-70b-instruct", "weight": 0.14},
                 {"name": "google/gemma-3-27b-it", "weight": 0.16},
                 {"name": "mistralai/mistral-small-3.2-24b-instruct", "weight": 0.18},
-                {"name": "meta-llama/llama-4-scout", "weight": 0.22}
+                {"name": "meta-llama/llama-4-scout", "weight": 0.22},
             ]
-            
+
             # Build the investment validity prompt
-            prompt = self._build_investment_validity_prompt(financial_data, valuation_data, investment_data)
-            
+            prompt = self._build_investment_validity_prompt(
+                financial_data, valuation_data, investment_data
+            )
+
             # Collect responses from all 5 models
             model_responses = []
-            
+
             for model in models:
                 try:
                     response = self._query_model(model["name"], prompt)
-                    model_responses.append({
-                        "model": model["name"],
-                        "weight": model["weight"],
-                        "response": response,
-                        "success": True
-                    })
+                    model_responses.append(
+                        {
+                            "model": model["name"],
+                            "weight": model["weight"],
+                            "response": response,
+                            "success": True,
+                        }
+                    )
                 except Exception as e:
-                    model_responses.append({
-                        "model": model["name"],
-                        "weight": model["weight"],
-                        "response": None,
-                        "success": False,
-                        "error": str(e)
-                    })
-            
+                    model_responses.append(
+                        {
+                            "model": model["name"],
+                            "weight": model["weight"],
+                            "response": None,
+                            "success": False,
+                            "error": str(e),
+                        }
+                    )
+
             # Aggregate results and send to final model
-            final_result = self._aggregate_model_responses(model_responses, financial_data, valuation_data, investment_data)
-            
+            final_result = self._aggregate_model_responses(
+                model_responses, financial_data, valuation_data, investment_data
+            )
+
             return {
                 "success": True,
                 "data": {
                     "individual_responses": model_responses,
                     "final_decision": final_result,
                     "models_used": len([r for r in model_responses if r["success"]]),
-                    "total_models": len(models)
-                }
+                    "total_models": len(models),
+                },
             }
-            
+
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Investment validity calculation error: {str(e)}"
+                "error": f"Investment validity calculation error: {str(e)}",
             }
-    
+
     def _query_model(self, model_name, prompt):
         """Query a specific model with the investment prompt"""
         payload = {
@@ -331,38 +331,39 @@ Be specific and actionable in your assessment. Focus on what investment informat
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a senior VC/PE investment analyst. Follow the provided prompt exactly and return only the requested JSON structure."
+                    "content": "You are a senior VC/PE investment analyst. Follow the provided prompt exactly and return only the requested JSON structure.",
                 },
-                {
-                    "role": "user", 
-                    "content": prompt
-                }
+                {"role": "user", "content": prompt},
             ],
             "max_tokens": 2000,
-            "temperature": 0.1
+            "temperature": 0.1,
         }
-        
-        response = requests.post(self.base_url, headers=self.headers, json=payload, timeout=45)
+
+        response = requests.post(
+            self.base_url, headers=self.headers, json=payload, timeout=45
+        )
         response.raise_for_status()
-        
+
         result = response.json()
-        content = result['choices'][0]['message']['content']
-        
+        content = result["choices"][0]["message"]["content"]
+
         return self._parse_investment_response(content)
-    
-    def _aggregate_model_responses(self, model_responses, financial_data, valuation_data, investment_data):
+
+    def _aggregate_model_responses(
+        self, model_responses, financial_data, valuation_data, investment_data
+    ):
         """Send all model responses to a final aggregation model with enhanced normalization"""
-        
+
         # Filter successful responses
         successful_responses = [r for r in model_responses if r["success"]]
-        
+
         if not successful_responses:
             return {
                 "verdict": "insufficient_data",
                 "confidence": 0,
-                "error": "No models provided valid responses"
+                "error": "No models provided valid responses",
             }
-        
+
         # Build enhanced aggregation prompt
         aggregation_prompt = f"""
 You are the final investment decision aggregator. You have received responses from {len(successful_responses)} AI models, each with different weights/coefficients. Your task is to produce a final normalized investment decision that takes these coefficients into account and provides realistic, well-reasoned output.
@@ -380,14 +381,14 @@ ORIGINAL DATA SOURCES:
 
 MODEL RESPONSES WITH THEIR COEFFICIENTS:
 """
-        
+
         for response in successful_responses:
             aggregation_prompt += f"""
 MODEL: {response['model']} (COEFFICIENT: {response['weight']})
 RESPONSE: {json.dumps(response['response'], indent=2)}
 
 """
-        
+
         aggregation_prompt += """
 NOTE: The user has explicitly initiated a full evaluation (e.g., pressed the evaluation button). Even if data is incomplete, you MUST produce a final verdict and full output package. Do not return an "insufficient_data" stop. Instead, when any data is incomplete, proceed with best-effort estimations, set lower confidence, and include clear follow_up_questions and provenance explaining what was estimated and why.
 
@@ -506,21 +507,23 @@ ADDITIONAL INSTRUCTIONS:
 
 Now analyze the provided data and model responses, apply the coefficients appropriately, and RETURN the single JSON result that follows OUTPUT_SCHEMA.
 """
-        
+
         # Send to the strongest model (llama-4-maverick) for final decision
         try:
-            final_response = self._query_model("meta-llama/llama-4-maverick", aggregation_prompt)
+            final_response = self._query_model(
+                "meta-llama/llama-4-maverick", aggregation_prompt
+            )
             return final_response
         except Exception as e:
             # Fallback: return the highest weighted successful response
             best_response = max(successful_responses, key=lambda x: x["weight"])
             return best_response["response"]
-    
+
     def _parse_investment_response(self, response_text):
         """Parse investment validity response from AI models"""
         try:
             response_text = response_text.strip()
-            
+
             # Try to find JSON content
             if "```json" in response_text and "```" in response_text:
                 start_marker = "```json"
@@ -536,29 +539,31 @@ Now analyze the provided data and model responses, apply the coefficients approp
                 return {
                     "verdict": "insufficient_data",
                     "confidence": 0,
-                    "error": "No valid JSON response format found"
+                    "error": "No valid JSON response format found",
                 }
-            
+
             parsed_data = json.loads(json_content)
             return parsed_data
-            
+
         except json.JSONDecodeError as e:
             return {
-                "verdict": "insufficient_data", 
+                "verdict": "insufficient_data",
                 "confidence": 0,
                 "error": f"JSON parsing error: {str(e)}",
-                "raw_response": response_text[:500]
+                "raw_response": response_text[:500],
             }
         except Exception as e:
             return {
                 "verdict": "insufficient_data",
-                "confidence": 0, 
-                "error": f"Response processing error: {str(e)}"
+                "confidence": 0,
+                "error": f"Response processing error: {str(e)}",
             }
-    
-    def _build_investment_validity_prompt(self, financial_data, valuation_data, investment_data):
+
+    def _build_investment_validity_prompt(
+        self, financial_data, valuation_data, investment_data
+    ):
         """Build the comprehensive investment validity prompt"""
-        
+
         # The exact prompt you provided with data injection
         prompt = f"""AI Investment Decision Prompt — Deterministic, Excel-Style (Consumes Pre-Computed Valuation, Stage- & Sector-Aware, Region-Adjusted, With Simple Summary for Non-Experts)
 
@@ -567,18 +572,19 @@ You are a senior VC/PE investment analyst producing a final investment decision 
 
 INPUT (your actual data)
 
-FINANCE_JSON
+FINANCE_JSON (Previously computed financial analysis)
 {json.dumps(financial_data, indent=2)}
 
-VALUATION_JSON  
+VALUATION_JSON (Previously computed valuation results)
 {json.dumps(valuation_data, indent=2)}
 
-NEW_INFO_JSON
+NEW_INFO_JSON (Investment terms and additional information)
+Note: This may include 'all_file_content' field containing original financial documents plus any additional files uploaded for this analysis.
 {json.dumps(investment_data, indent=2)}
 
 [Rest of the prompt with CONSTANTS, PROCESS, OUTPUT_SCHEMA remains exactly the same as provided]
 
 Return ONLY the JSON structure. No explanations or markdown outside the JSON.
 """
-        
+
         return prompt

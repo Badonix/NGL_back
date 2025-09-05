@@ -4,270 +4,272 @@ from datetime import datetime
 from config import Config
 from .pdf_generator import PDFGenerator
 
+
 class GeminiFinancialExtractor:
     def __init__(self):
         if not Config.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY environment variable is required")
-        
+
         genai.configure(api_key=Config.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-2.5-flash-lite')
-        
+        self.model = genai.GenerativeModel("gemini-2.5-flash-lite")
+
         self.generation_config = {
-            "max_output_tokens": 8192,
+            "max_output_tokens": 16384,
             "temperature": 0.1,
         }
-        
+
         self.pdf_generator = PDFGenerator()
         self.financial_prompt = self._get_financial_prompt()
         self.investment_prompt = self._get_investment_prompt()
-    
+
     def extract_financial_data(self, document_text):
-        # Try with normal settings first
         for attempt in range(2):
             try:
                 if attempt == 0:
-                    # First attempt with normal settings
                     config = self.generation_config
                     print("Gemini attempt 1: Normal settings")
                 else:
-                    # Second attempt with different settings
                     config = {
                         "max_output_tokens": 4096,
                         "temperature": 0.3,
                     }
                     print("Gemini attempt 2: Adjusted settings")
-                
+
                 full_prompt = self.financial_prompt + document_text
-                response = self.model.generate_content(full_prompt, generation_config=config)
                 
-                # Enhanced response validation
+                print(f"DEBUG: Sending {len(document_text)} characters to Gemini")
+                print(f"DEBUG: Document contains {document_text.count('--- FILE:')} file separators")
+                
+                response = self.model.generate_content(
+                    full_prompt, generation_config=config
+                )
+
                 if not response:
                     raise ValueError("No response object returned from Gemini")
-                
-                # Enhanced text extraction handling multi-part responses
+
                 response_text = self._extract_response_text(response)
                 if not response_text:
                     raise ValueError("No text content in Gemini response")
-                
-                # Log the raw response length for debugging
+
                 print(f"Gemini response length: {len(response_text)} characters")
                 
-                # Additional validation - check if response looks like it might contain JSON
                 if len(response_text.strip()) < 10:
                     raise ValueError(f"Response too short: '{response_text.strip()}'")
-                
+
                 financial_data = self._parse_response(response_text)
-                pdf_result = self._generate_pdf_if_needed(financial_data)
                 
+                print(f"DEBUG: Parsed financial_analysis keys: {financial_data.get('financial_analysis', {}).keys() if 'financial_analysis' in financial_data else 'No financial_analysis'}")
+                if 'financial_analysis' in financial_data and 'income_statement' in financial_data['financial_analysis']:
+                    revenue_years = list(financial_data['financial_analysis']['income_statement'].get('revenue_sales', {}).keys())
+                    print(f"DEBUG: Revenue data extracted for years: {revenue_years}")
+                    
+                    # Log a sample of the raw response to see what AI is returning
+                    print(f"DEBUG: Raw response preview: {response_text[:500]}...")
+                    if "2021" in response_text or "2022" in response_text:
+                        print(f"DEBUG: Found 2021/2022 in raw response but not in parsed data!")
+                    
+                    # Check all financial statement sections for years
+                    for section_name, section_data in financial_data['financial_analysis'].items():
+                        if isinstance(section_data, dict):
+                            all_years = set()
+                            for item_name, item_data in section_data.items():
+                                if isinstance(item_data, dict):
+                                    all_years.update(item_data.keys())
+                            if all_years:
+                                print(f"DEBUG: {section_name} contains years: {sorted(all_years)}")
+                
+                # Check summarized_data for year mentions
+                if 'summerized_data' in financial_data:
+                    summarized_text = str(financial_data['summerized_data'])
+                    years_in_summary = []
+                    for year in ['2021', '2022', '2023', '2024', '2025']:
+                        if year in summarized_text:
+                            years_in_summary.append(year)
+                    print(f"DEBUG: summarized_data mentions years: {years_in_summary}")
+                    print(f"DEBUG: summarized_data length: {len(summarized_text)} characters")
+                pdf_result = self._generate_pdf_if_needed(financial_data)
+
                 return {
                     "success": True,
                     "data": financial_data,
-                    "pdf_result": pdf_result
+                    "pdf_result": pdf_result,
                 }
-                
+
             except Exception as e:
                 print(f"Gemini attempt {attempt + 1} failed: {str(e)}")
-                if attempt == 1:  # Last attempt
-                    # Enhanced error information
+                if attempt == 1:
                     error_info = {
                         "success": False,
                         "error": f"Gemini API error (all attempts failed): {str(e)}",
-                        "raw_response": None
+                        "raw_response": None,
                     }
-                    
-                    # If we have a response object, try to get some debug info
                     try:
-                        if 'response' in locals() and response:
+                        if "response" in locals() and response:
                             response_text = self._extract_response_text(response)
-                            error_info["raw_response"] = response_text[:1000] if response_text else "No text content"
-                            if hasattr(response, 'candidates'):
-                                error_info["candidates_count"] = len(response.candidates) if response.candidates else 0
+                            error_info["raw_response"] = (
+                                response_text[:1000]
+                                if response_text
+                                else "No text content"
+                            )
+                            if hasattr(response, "candidates"):
+                                error_info["candidates_count"] = (
+                                    len(response.candidates)
+                                    if response.candidates
+                                    else 0
+                                )
                     except:
                         pass
-                    
+
                     return error_info
-                # Continue to next attempt
                 continue
-    
+
     def analyze_investment_data(self, document_text):
         try:
             full_prompt = self.investment_prompt + document_text
-            response = self.model.generate_content(full_prompt, generation_config=self.generation_config)
-            
+            response = self.model.generate_content(
+                full_prompt, generation_config=self.generation_config
+            )
+
             if not response.text:
                 raise ValueError("No response generated from Gemini")
-            
+
             investment_data = self._parse_investment_response(response.text)
-            
-            return {
-                "success": True,
-                "data": investment_data
-            }
-            
+
+            return {"success": True, "data": investment_data}
+
         except Exception as e:
             return {
                 "success": False,
                 "error": f"Gemini API error: {str(e)}",
-                "raw_response": None
+                "raw_response": None,
             }
-    
+
     def check_investment_sufficiency(self, document_text):
-        """
-        Check investment data sufficiency using Gemini
-        """
         try:
             sufficiency_prompt = self._get_sufficiency_prompt() + document_text
-            response = self.model.generate_content(sufficiency_prompt, generation_config=self.generation_config)
-            
+            response = self.model.generate_content(
+                sufficiency_prompt, generation_config=self.generation_config
+            )
+
             response_text = self._extract_response_text(response)
             if not response_text:
                 raise ValueError("No text content in Gemini response")
-            
+
             sufficiency_data = self._parse_sufficiency_response(response_text)
-            
-            return {
-                "success": True,
-                **sufficiency_data
-            }
-            
+
+            return {"success": True, **sufficiency_data}
+
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"Gemini API error: {str(e)}"
-            }
-    
+            return {"success": False, "error": f"Gemini API error: {str(e)}"}
+
     def _parse_response(self, response_text):
         try:
-            # First check if we have any response at all
             if not response_text or response_text.strip() == "":
                 raise ValueError("Empty response from Gemini API")
-            
+
             response_text = response_text.strip()
-            
-            # Enhanced JSON extraction with multiple fallback methods
             json_text = self._extract_json_content(response_text)
-            
+
             if not json_text:
-                raise ValueError(f"No valid JSON found in response. Raw response: {response_text[:200]}...")
-            
-            # Clean the JSON text
-            json_text = json_text.replace('\\n', '\n').replace('\\"', '"')
-            
-            # Fix common JSON issues
+                raise ValueError(
+                    f"No valid JSON found in response. Raw response: {response_text[:200]}..."
+                )
+            json_text = json_text.replace("\\n", "\n").replace('\\"', '"')
             json_text = self._fix_common_json_issues(json_text)
-            
-            if not json_text.rstrip().endswith('}'):
+
+            if not json_text.rstrip().endswith("}"):
                 json_text = self._fix_truncated_json(json_text)
-            
+
             parsed_data = json.loads(json_text)
-            
-            # Convert string numbers to actual numbers in financial analysis
-            if 'financial_analysis' in parsed_data:
-                parsed_data['financial_analysis'] = self._convert_string_numbers(parsed_data['financial_analysis'])
-            
+            if "financial_analysis" in parsed_data:
+                parsed_data["financial_analysis"] = self._convert_string_numbers(
+                    parsed_data["financial_analysis"]
+                )
+
             return parsed_data
-            
+
         except json.JSONDecodeError as e:
-            # Try to extract partial data as fallback
             try:
                 partial_data = self._extract_partial_data(response_text)
                 if partial_data:
                     return partial_data
             except:
                 pass
-            
-            # If all else fails, provide a detailed error with the raw response
-            raise ValueError(f"Failed to parse JSON response from Gemini: {str(e)}. Raw response: {response_text[:500]}...")
+            raise ValueError(
+                f"Failed to parse JSON response from Gemini: {str(e)}. Raw response: {response_text[:500]}..."
+            )
         except Exception as e:
-            raise ValueError(f"Response parsing error: {str(e)}. Raw response: {response_text[:500]}...")
-    
+            raise ValueError(
+                f"Response parsing error: {str(e)}. Raw response: {response_text[:500]}..."
+            )
+
     def _extract_response_text(self, response):
-        """Extract text from Gemini response handling both simple and multi-part responses"""
         try:
-            # Try the simple accessor first
-            if hasattr(response, 'text') and response.text:
+            if hasattr(response, "text") and response.text:
                 return response.text
         except ValueError:
-            # If simple accessor fails, use the parts accessor
             pass
-        
+
         try:
-            # Handle multi-part responses
-            if hasattr(response, 'candidates') and response.candidates:
+            if hasattr(response, "candidates") and response.candidates:
                 candidate = response.candidates[0]
-                if hasattr(candidate, 'content') and candidate.content:
-                    if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                        # Concatenate all text parts
+                if hasattr(candidate, "content") and candidate.content:
+                    if hasattr(candidate.content, "parts") and candidate.content.parts:
                         text_parts = []
                         for part in candidate.content.parts:
-                            if hasattr(part, 'text') and part.text:
+                            if hasattr(part, "text") and part.text:
                                 text_parts.append(part.text)
-                        return ''.join(text_parts)
+                        return "".join(text_parts)
         except Exception as e:
             print(f"Error extracting response text: {e}")
-        
+
         return None
 
     def _extract_json_content(self, response_text):
-        """Enhanced JSON extraction with multiple fallback methods"""
-        # Method 1: Standard markdown code blocks
         if "```json" in response_text:
             start = response_text.find("```json") + 7
             end = response_text.find("```", start)
             if end != -1:
                 return response_text[start:end].strip()
-        
-        # Method 2: Generic code blocks
         if response_text.startswith("```") and response_text.endswith("```"):
             return response_text[3:-3].strip()
-        
-        # Method 3: Look for JSON-like structure
         if "{" in response_text and "}" in response_text:
             start = response_text.find("{")
             end = response_text.rfind("}") + 1
             return response_text[start:end]
-        
-        # Method 4: Return as-is (maybe it's just JSON without formatting)
         return response_text
-    
+
     def _fix_common_json_issues(self, json_text):
-        """Fix common JSON formatting issues"""
         import re
-        
-        # Remove any trailing commas before closing braces/brackets
-        json_text = re.sub(r',(\s*[}\]])', r'\1', json_text)
-        
-        # Remove extra commas after closing braces (common Gemini issue)
+
+        json_text = re.sub(r",(\s*[}\]])", r"\1", json_text)
         json_text = re.sub(r'}(\s*),(\s*)"', r'}\2"', json_text)
-        
-        # Fix double commas
-        json_text = re.sub(r',,+', ',', json_text)
-        
-        # Fix missing commas between objects/arrays (but be careful not to break strings)
-        # This is a simple pattern - may need refinement
+        json_text = re.sub(r",,+", ",", json_text)
         json_text = re.sub(r'}(\s+)"', r'},\1"', json_text)
         json_text = re.sub(r'](\s+)"', r'],\1"', json_text)
         json_text = re.sub(r'(\d)(\s+)"', r'\1,\2"', json_text)
         json_text = re.sub(r'null(\s+)"', r'null,\1"', json_text)
-        
+
         return json_text
 
     def _convert_string_numbers(self, data):
-        """Convert string numbers to actual numbers in the financial data structure"""
         if isinstance(data, dict):
             converted = {}
             for key, value in data.items():
                 if isinstance(value, dict):
                     converted[key] = self._convert_string_numbers(value)
                 elif isinstance(value, str):
-                    # Handle various string number formats
                     if value == "null" or value == "None" or value == "":
                         converted[key] = None
                     elif value.isdigit():
                         converted[key] = int(value)
-                    elif value.replace('.', '').replace('-', '').replace(',', '').isdigit():
-                        # Remove commas and convert to float
-                        clean_value = value.replace(',', '')
+                    elif (
+                        value.replace(".", "")
+                        .replace("-", "")
+                        .replace(",", "")
+                        .isdigit()
+                    ):
+                        clean_value = value.replace(",", "")
                         converted[key] = float(clean_value)
                     else:
                         converted[key] = value
@@ -275,62 +277,66 @@ class GeminiFinancialExtractor:
                     converted[key] = value
             return converted
         return data
-    
+
     def _fix_truncated_json(self, json_text):
-        last_brace = json_text.rfind('}')
+        last_brace = json_text.rfind("}")
         if last_brace > 0:
             brace_count = 0
             for i in range(last_brace, -1, -1):
-                if json_text[i] == '}':
+                if json_text[i] == "}":
                     brace_count += 1
-                elif json_text[i] == '{':
+                elif json_text[i] == "{":
                     brace_count -= 1
                     if brace_count == 0:
-                        return json_text[:i+1] + '}'
+                        return json_text[: i + 1] + "}"
         return json_text
-    
+
     def _extract_partial_data(self, json_text):
         try:
             if '"financial_analysis"' in json_text:
                 start_idx = json_text.find('"financial_analysis"')
-                brace_start = json_text.find('{', start_idx)
+                brace_start = json_text.find("{", start_idx)
                 if brace_start > 0:
                     brace_count = 0
                     end_idx = -1
                     for i in range(brace_start, len(json_text)):
-                        if json_text[i] == '{':
+                        if json_text[i] == "{":
                             brace_count += 1
-                        elif json_text[i] == '}':
+                        elif json_text[i] == "}":
                             brace_count -= 1
                             if brace_count == 0:
                                 end_idx = i
                                 break
-                    
+
                     if end_idx > 0:
-                        partial_json = json_text[brace_start:end_idx+1]
+                        partial_json = json_text[brace_start : end_idx + 1]
                         financial_data = json.loads(partial_json)
                         return {"financial_analysis": financial_data}
         except:
             pass
         return None
-    
+
     def _generate_pdf_if_needed(self, financial_data):
-        if "summerized_data" not in financial_data or not financial_data["summerized_data"]:
+        if (
+            "summerized_data" not in financial_data
+            or not financial_data["summerized_data"]
+        ):
             return None
-        
-        pdf_filename = f"financial_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        pdf_path = f"{Config.PDF_FOLDER}/{pdf_filename}"
-        
-        pdf_result = self.pdf_generator.generate_summary_pdf(
-            financial_data["summerized_data"], 
-            pdf_path
+
+        pdf_filename = (
+            f"financial_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         )
-        
+        pdf_path = f"{Config.PDF_FOLDER}/{pdf_filename}"
+
+        pdf_result = self.pdf_generator.generate_summary_pdf(
+            financial_data["summerized_data"], pdf_path
+        )
+
         if pdf_result["success"]:
             pdf_result["public_url"] = f"/pdfs/{pdf_filename}"
-        
+
         return pdf_result
-    
+
     def _get_financial_prompt(self):
         return """
 You are a financial data extraction expert specializing in Georgian financial statements. Analyze the provided document and extract the specific financial line items listed below in a structured JSON format.
@@ -373,7 +379,10 @@ You are a financial data extraction expert specializing in Georgian financial st
 - Changes in Working Capital (სამუშაო კაპიტალის ცვლილებები)
 - Free Cash Flow/FCF (calculated)
 
-Besides it, save all available financial data to the summerized data field, including summerized info about company, everthing important, but do more focus on financial data, as it is a financial summary.
+Besides it, save all available financial data to the summerized data field, including summerized info about company, everything important, but do more focus on financial data, as it is a financial summary.
+
+🚨 **CRITICAL: SUMMARIZED DATA MUST INCLUDE ALL YEARS FOUND** 🚨
+The summarized_data field MUST include information for ALL years actually found across ALL files. If the documents contain only 2023 data, include only 2023. If they contain 2021-2024, include all 4 years. Do NOT add years that don't exist in the documents. Include historical trends, year-over-year changes, and comprehensive financial evolution across ALL available years.
 
 Please provide the response in the following JSON structure:
 
@@ -383,40 +392,40 @@ Please provide the response in the following JSON structure:
     },
   "financial_analysis": {
     "income_statement": {
-      "revenue_sales": {"2022": "number", "2023": "number"},
-      "cogs": {"2022": "number", "2023": "number"},
-      "gross_profit": {"2022": "number", "2023": "number", "note": "calculated"},
-      "operating_expenses": {"2022": "number", "2023": "number"},
-      "depreciation_amortization": {"2022": "number", "2023": "number"},
-      "other_operating_income_expense": {"2022": "number", "2023": "number"},
-      "operating_profit_ebit": {"2022": "number", "2023": "number"},
-      "interest_expense": {"2022": "number", "2023": "number"},
-      "interest_income": {"2022": "number", "2023": "number"},
-      "foreign_exchange_gains_losses": {"2022": "number", "2023": "number"},
-      "profit_before_tax_ebt": {"2022": "number", "2023": "number"},
-      "income_tax_expense": {"2022": "number", "2023": "number"},
-      "net_income": {"2022": "number", "2023": "number"}
+      "revenue_sales": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "cogs": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "gross_profit": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found", "note": "calculated"},
+      "operating_expenses": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "depreciation_amortization": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "other_operating_income_expense": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "operating_profit_ebit": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "interest_expense": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "interest_income": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "foreign_exchange_gains_losses": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "profit_before_tax_ebt": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "income_tax_expense": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "net_income": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"}
     },
     "balance_sheet": {
-      "cash_equivalents": {"2022": "number", "2023": "number"},
-      "accounts_receivable": {"2022": "number", "2023": "number"},
-      "inventory": {"2022": "number", "2023": "number"},
-      "other_current_assets": {"2022": "number", "2023": "number"},
-      "ppe": {"2022": "number", "2023": "number"},
-      "intangible_assets": {"2022": "number", "2023": "number"},
-      "accounts_payable": {"2022": "number", "2023": "number"},
-      "short_term_debt": {"2022": "number", "2023": "number"},
-      "long_term_debt": {"2022": "number", "2023": "number"},
-      "deferred_tax_liabilities": {"2022": "number", "2023": "number"},
-      "shareholders_equity": {"2022": "number", "2023": "number"}
+      "cash_equivalents": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "accounts_receivable": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "inventory": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "other_current_assets": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "ppe": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "intangible_assets": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "accounts_payable": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "short_term_debt": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "long_term_debt": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "deferred_tax_liabilities": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "shareholders_equity": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"}
     },
     "cash_flow_statement": {
-      "cash_flow_from_operations": {"2022": "number", "2023": "number"},
-      "taxes_paid": {"2022": "number", "2023": "number"},
-      "interest_paid": {"2022": "number", "2023": "number"},
-      "capital_expenditures": {"2022": "number", "2023": "number"},
-      "changes_in_working_capital": {"2022": "number", "2023": "number"},
-      "free_cash_flow": {"2022": "number", "2023": "number", "note": "calculated"}
+      "cash_flow_from_operations": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "taxes_paid": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "interest_paid": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "capital_expenditures": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "changes_in_working_capital": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found"},
+      "free_cash_flow": {"YEAR1": "number", "YEAR2": "number", "etc": "for all years found", "note": "calculated"}
     }
   }
 }
@@ -429,17 +438,56 @@ Please provide the response in the following JSON structure:
 5. **All years should be strings** (e.g., "2023", "2022")
 6. **Missing data should be null** (not "N/A" or empty string)
 
-**IMPORTANT:** Extract data for ALL available years found in the document, not just the example years shown above. Use the actual years from the financial statements (e.g., 2019, 2020, 2021, 2022, 2023, 2024, etc.). If any information is not available for a specific year, use null for that field. Include extraction_notes for any items that could not be found or extracted. Be precise with numbers and focus on extracting quantitative data that would be valuable for investment analysis.
+🚨 **MANDATORY MULTI-YEAR EXTRACTION REQUIREMENTS - DO NOT IGNORE** 🚨
+
+**CRITICAL RULE: YOU MUST EXTRACT DATA FOR ALL YEARS FOUND IN ALL FILES**
+
+1. **SCAN ALL FILES**: The document contains MULTIPLE files separated by "--- FILE:" markers. YOU MUST analyze EVERY SINGLE FILE.
+
+2. **EXTRACT ALL YEARS FOUND**: Do NOT limit yourself to recent years. Extract ONLY the years that actually contain data in the documents. If you find data for 2021, 2022, 2023, 2024, 2025, or ANY other years, you MUST include ALL of them in your response. If only 2023 data exists, include only 2023. If 2021-2024 exists, include all 4 years.
+
+3. **NO CHERRY-PICKING**: Do NOT select only the "most recent" or "most complete" years. Extract EVERY year you find.
+
+4. **HISTORICAL DATA PRIORITY**: Often older files contain 2021-2022 data and newer files contain 2023-2024 data. YOU MUST INCLUDE BOTH.
+
+5. **VERIFICATION REQUIREMENT**: Before responding, verify you have extracted data for ALL years mentioned in ALL files.
+
+6. **ALL THE YEARS SHOULD BE A VALID YEAR**: Check if year is valid, it should be saying 2021, not 21.
+
+7. **APPLIES TO ALL SECTIONS**: This requirement applies to BOTH the "financial_analysis" section AND the "summarized_data" section. BOTH must include all years. 
+
+**EXAMPLE SCENARIOS (FOLLOW THESE EXACTLY):**
+
+**Scenario A - Multiple Years:**
+- File 1: Contains 2023-2024 data → Extract 2023, 2024
+- File 2: Contains 2021-2022 data → Extract 2021, 2022  
+- YOUR RESPONSE: MUST include ALL years: 2021, 2022, 2023, 2024
+
+**Scenario B - Single Year:**
+- File 1: Contains only 2023 data → Extract only 2023
+- YOUR RESPONSE: Include only 2023
+
+**Scenario C - Two Years:**
+- File 1: Contains 2022-2023 data → Extract 2022, 2023
+- YOUR RESPONSE: Include only 2022, 2023
+
+**CRITICAL RULE: ONLY INCLUDE YEARS THAT ACTUALLY HAVE DATA IN THE DOCUMENTS**
+
+**FAILURE TO FOLLOW = INCORRECT RESPONSE**
+
+If any information is not available for a specific year, use null for that field. Include extraction_notes for any items that could not be found or extracted. Be precise with numbers and focus on extracting quantitative data that would be valuable for investment analysis.
 
 RETURN ONLY THE JSON OBJECT - NO OTHER TEXT.
 
+⚠️ FINAL REMINDER: The document below contains MULTIPLE years across MULTIPLE files. Extract ALL years - do not limit to recent years only. ⚠️
+
 Document content to analyze:
 """
-    
+
     def _parse_investment_response(self, response_text):
         try:
             response_text = response_text.strip()
-            
+
             # Try to find JSON content between ```json and ```
             if "```json" in response_text and "```" in response_text:
                 start_marker = "```json"
@@ -460,13 +508,13 @@ Document content to analyze:
                         "recommendations": [],
                         "risk_assessment": "Analysis provided as text",
                         "opportunities": [],
-                        "market_analysis": response_text
+                        "market_analysis": response_text,
                     }
                 }
-            
+
             parsed_data = json.loads(json_content)
             return parsed_data
-            
+
         except json.JSONDecodeError as e:
             return {
                 "investment_analysis": {
@@ -475,7 +523,7 @@ Document content to analyze:
                     "risk_assessment": "JSON parsing error",
                     "opportunities": [],
                     "market_analysis": response_text,
-                    "parse_error": str(e)
+                    "parse_error": str(e),
                 }
             }
         except Exception as e:
@@ -485,11 +533,13 @@ Document content to analyze:
                     "recommendations": [],
                     "risk_assessment": "Processing error",
                     "opportunities": [],
-                    "market_analysis": response_text if 'response_text' in locals() else "No response",
-                    "error": str(e)
+                    "market_analysis": (
+                        response_text if "response_text" in locals() else "No response"
+                    ),
+                    "error": str(e),
                 }
             }
-    
+
     def _get_investment_prompt(self):
         return """
 You are a professional investment analyst and financial advisor. Your task is to analyze the provided investment data, market information, financial projections, or company reports and provide comprehensive investment insights.
@@ -585,7 +635,7 @@ Please provide the response in the following JSON structure:
 
 Investment data to analyze:
 """
-    
+
     def _get_sufficiency_prompt(self):
         return """
 You are a professional investment analyst. Analyze the provided investment data comprehensively and rate its sufficiency for making sound investment decisions.
@@ -677,172 +727,209 @@ Provide your response in this exact JSON format:
 
 Investment data to analyze:
 """
-    
+
     def _parse_sufficiency_response(self, response_text):
         """Parse sufficiency check response from Gemini with enhanced error handling"""
         try:
             response_text = response_text.strip()
-            
+
             # Try multiple extraction methods
             json_text = None
-            
+
             # Method 1: Standard JSON extraction
             json_text = self._extract_json_content(response_text)
-            
+
             # Method 2: If that fails, try to find JSON boundaries more aggressively
             if not json_text or len(json_text.strip()) < 10:
                 # Look for any { } pair
-                start_brace = response_text.find('{')
-                end_brace = response_text.rfind('}')
+                start_brace = response_text.find("{")
+                end_brace = response_text.rfind("}")
                 if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
-                    json_text = response_text[start_brace:end_brace + 1]
-            
+                    json_text = response_text[start_brace : end_brace + 1]
+
             if not json_text:
                 # Method 3: Extract from markdown code blocks more aggressively
                 import re
+
                 # Look for any content between ``` blocks
-                code_blocks = re.findall(r'```(?:json)?\s*({.*?})\s*```', response_text, re.DOTALL | re.IGNORECASE)
+                code_blocks = re.findall(
+                    r"```(?:json)?\s*({.*?})\s*```",
+                    response_text,
+                    re.DOTALL | re.IGNORECASE,
+                )
                 if code_blocks:
                     json_text = code_blocks[0]
-            
+
             if not json_text:
                 # Fallback: try to extract key information manually
                 return self._extract_sufficiency_manually(response_text)
-            
+
             # Clean and parse JSON with enhanced cleaning
             json_text = self._clean_json_for_parsing(json_text)
-            
+
             try:
                 parsed_data = json.loads(json_text)
             except json.JSONDecodeError:
                 # Try one more cleaning pass
                 json_text = self._aggressive_json_cleaning(json_text)
                 parsed_data = json.loads(json_text)
-            
+
             # Ensure all required fields exist with defaults
             return {
                 "sufficiency_percentage": parsed_data.get("sufficiency_percentage", 50),
                 "missing_data": parsed_data.get("missing_data", []),
                 "recommendations": parsed_data.get("recommendations", []),
-                "critical_gaps": parsed_data.get("critical_gaps", [])
+                "critical_gaps": parsed_data.get("critical_gaps", []),
             }
-            
+
         except json.JSONDecodeError as e:
             # Try to extract any valid data from partial JSON
             try:
                 # Look for percentage in the raw text
                 import re
-                percentage_match = re.search(r'"sufficiency_percentage":\s*(\d+)', response_text)
+
+                percentage_match = re.search(
+                    r'"sufficiency_percentage":\s*(\d+)', response_text
+                )
                 percentage = int(percentage_match.group(1)) if percentage_match else 40
-                
+
                 # Try to extract missing data array
-                missing_match = re.search(r'"missing_data":\s*\[(.*?)\]', response_text, re.DOTALL)
+                missing_match = re.search(
+                    r'"missing_data":\s*\[(.*?)\]', response_text, re.DOTALL
+                )
                 missing_data = []
                 if missing_match:
                     # Simple extraction of quoted strings
                     items = re.findall(r'"([^"]*)"', missing_match.group(1))
                     missing_data = items[:10]  # Limit to first 10 items
-                
+
                 if not missing_data:
                     missing_data = ["Data parsing incomplete - please try again"]
-                
+
                 return {
                     "sufficiency_percentage": percentage,
                     "missing_data": missing_data,
-                    "recommendations": ["Response was partially parsed due to formatting issues"],
-                    "critical_gaps": ["Partial data extraction performed"]
+                    "recommendations": [
+                        "Response was partially parsed due to formatting issues"
+                    ],
+                    "critical_gaps": ["Partial data extraction performed"],
                 }
             except:
                 return {
                     "sufficiency_percentage": 40,
                     "missing_data": ["JSON parsing error in response"],
-                    "recommendations": [f"Raw response preview: {response_text[:300]}..."],
-                    "critical_gaps": ["Model response format error"]
+                    "recommendations": [
+                        f"Raw response preview: {response_text[:300]}..."
+                    ],
+                    "critical_gaps": ["Model response format error"],
                 }
         except Exception as e:
             return {
                 "sufficiency_percentage": 30,
                 "missing_data": [f"Error parsing response: {str(e)}"],
                 "recommendations": ["Please try again"],
-                "critical_gaps": ["System error occurred"]
+                "critical_gaps": ["System error occurred"],
             }
-    
+
     def _clean_json_for_parsing(self, json_text):
         """Enhanced JSON cleaning for parsing"""
         # Remove any leading/trailing whitespace
         json_text = json_text.strip()
-        
+
         # Remove any markdown formatting
-        if json_text.startswith('```') and json_text.endswith('```'):
+        if json_text.startswith("```") and json_text.endswith("```"):
             json_text = json_text[3:-3].strip()
-            
-        if json_text.startswith('json'):
+
+        if json_text.startswith("json"):
             json_text = json_text[4:].strip()
-        
+
         # Apply existing cleaning
         json_text = self._fix_common_json_issues(json_text)
-        
+
         return json_text
-    
+
     def _aggressive_json_cleaning(self, json_text):
         """More aggressive JSON cleaning as last resort"""
         import re
-        
+
         # Remove any text before the first {
-        first_brace = json_text.find('{')
+        first_brace = json_text.find("{")
         if first_brace > 0:
             json_text = json_text[first_brace:]
-        
+
         # Remove any text after the last }
-        last_brace = json_text.rfind('}')
+        last_brace = json_text.rfind("}")
         if last_brace != -1:
-            json_text = json_text[:last_brace + 1]
-        
+            json_text = json_text[: last_brace + 1]
+
         # Fix common issues
-        json_text = re.sub(r',(\s*[}\]])', r'\1', json_text)  # Remove trailing commas
-        json_text = re.sub(r'([}\]])(\s*)(["\w])', r'\1,\2\3', json_text)  # Add missing commas
-        
+        json_text = re.sub(r",(\s*[}\]])", r"\1", json_text)  # Remove trailing commas
+        json_text = re.sub(
+            r'([}\]])(\s*)(["\w])', r"\1,\2\3", json_text
+        )  # Add missing commas
+
         return json_text
-    
+
     def _extract_sufficiency_manually(self, response_text):
         """Manual extraction when JSON parsing completely fails"""
         import re
-        
+
         # Try to extract percentage
         percentage_patterns = [
             r'sufficiency_percentage["\s]*:\s*(\d+)',
             r'percentage["\s]*:\s*(\d+)',
-            r'(\d+)%',
-            r'(\d+)\s*percent'
+            r"(\d+)%",
+            r"(\d+)\s*percent",
         ]
-        
+
         percentage = 40  # Default
         for pattern in percentage_patterns:
             match = re.search(pattern, response_text, re.IGNORECASE)
             if match:
                 percentage = int(match.group(1))
                 break
-        
+
         # Detect investment negative signals
         negative_signals = [
-            'shit', 'terrible', 'awful', 'horrible', 'not viable', 'fundamentally flawed',
-            'should not invest', 'avoid investment', 'not recommended', 'poor business model',
-            'declining', 'unsustainable', 'high risk', 'unprofitable'
+            "shit",
+            "terrible",
+            "awful",
+            "horrible",
+            "not viable",
+            "fundamentally flawed",
+            "should not invest",
+            "avoid investment",
+            "not recommended",
+            "poor business model",
+            "declining",
+            "unsustainable",
+            "high risk",
+            "unprofitable",
         ]
-        
-        is_negative = any(signal in response_text.lower() for signal in negative_signals)
-        
+
+        is_negative = any(
+            signal in response_text.lower() for signal in negative_signals
+        )
+
         if is_negative or percentage == 0:
             return {
                 "sufficiency_percentage": 0,
-                "missing_data": ["INVESTMENT NOT RECOMMENDED - Business fundamentals are flawed"],
-                "recommendations": ["Avoid this investment opportunity due to fundamental business issues"],
-                "critical_gaps": ["Poor business model or fundamentally flawed investment opportunity"]
+                "missing_data": [
+                    "INVESTMENT NOT RECOMMENDED - Business fundamentals are flawed"
+                ],
+                "recommendations": [
+                    "Avoid this investment opportunity due to fundamental business issues"
+                ],
+                "critical_gaps": [
+                    "Poor business model or fundamentally flawed investment opportunity"
+                ],
             }
-        
+
         return {
             "sufficiency_percentage": percentage,
-            "missing_data": ["Complete response could not be parsed - manual review recommended"],
+            "missing_data": [
+                "Complete response could not be parsed - manual review recommended"
+            ],
             "recommendations": ["Request additional data and re-run analysis"],
-            "critical_gaps": ["Response parsing incomplete"]
+            "critical_gaps": ["Response parsing incomplete"],
         }

@@ -44,13 +44,11 @@ class ValuationService:
         try:
             response_text = response_text.strip()
 
-            # Extract JSON from markdown code blocks if present
             if response_text.startswith("```json") and response_text.endswith("```"):
                 json_text = response_text[7:-3].strip()
             elif response_text.startswith("```") and response_text.endswith("```"):
                 json_text = response_text[3:-3].strip()
             else:
-                # Look for JSON object in the response
                 start_idx = response_text.find("{")
                 end_idx = response_text.rfind("}")
                 if start_idx >= 0 and end_idx > start_idx:
@@ -63,7 +61,6 @@ class ValuationService:
             return json.loads(json_text)
 
         except json.JSONDecodeError as e:
-            # If JSON parsing fails, return the raw response with error info
             return {
                 "error": f"Failed to parse JSON response: {str(e)}",
                 "raw_response": (response_text),
@@ -300,5 +297,4 @@ OUTPUT — Return ONLY this JSON structure (values in absolute GEL; no extra fie
 IMPORTANT
 - Return ONLY the JSON structure above. Do not include any additional text, explanations, or markdown outside the JSON response.
 - Use ONLY the INPUT and CONSTANTS provided (plus the explicit assumptions/guards). No external data.
-
 """

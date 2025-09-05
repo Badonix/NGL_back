@@ -5,6 +5,7 @@ flask-cors==4.0.0
 google-generativeai==0.3.2
 python-dotenv==1.0.0
 PyPDF2==3.0.1
+pycryptodome==3.19.0
 python-docx==0.8.11
 reportlab==4.0.4
 pandas==2.1.4
