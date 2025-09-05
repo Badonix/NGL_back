@@ -1,10 +1,12 @@
 import requests
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import Config
 
 
 class OpenRouterService:
-    def __init__(self):
+    def __init__(self, max_concurrent_workers=4):
         if not Config.OPENROUTER_API_KEY:
             raise ValueError("OPENROUTER_API_KEY environment variable is required")
 
@@ -18,6 +20,10 @@ class OpenRouterService:
             "HTTP-Referer": "http://localhost:5000",
             "X-Title": "NGL Financial Analyzer",
         }
+        
+        # Configuration for parallel processing
+        self.max_concurrent_workers = max_concurrent_workers
+        self.model_timeout = 30  # seconds per model
 
     def check_investment_sufficiency(
         self, valuation_data, financial_data, investment_data
@@ -278,30 +284,37 @@ Be specific and actionable in your assessment. Focus on what investment informat
                 financial_data, valuation_data, investment_data
             )
 
-            # Collect responses from all 5 models
-            model_responses = []
-
-            for model in models:
-                try:
-                    response = self._query_model(model["name"], prompt)
-                    model_responses.append(
-                        {
-                            "model": model["name"],
-                            "weight": model["weight"],
-                            "response": response,
-                            "success": True,
-                        }
-                    )
-                except Exception as e:
-                    model_responses.append(
-                        {
-                            "model": model["name"],
-                            "weight": model["weight"],
-                            "response": None,
-                            "success": False,
-                            "error": str(e),
-                        }
-                    )
+            # Collect responses from all 5 models in parallel
+            print(f"DEBUG: Starting parallel processing of {len(models)} models")
+            start_time = time.time()
+            
+            model_responses = self._query_models_parallel(models, prompt)
+            
+            end_time = time.time()
+            successful_models = sum(1 for r in model_responses if r['success'])
+            total_models = len(model_responses)
+            
+            print(f"DEBUG: Parallel processing completed in {end_time - start_time:.2f} seconds")
+            print(f"DEBUG: Successfully processed {successful_models}/{total_models} models")
+            
+            # Log individual model performance
+            for response in model_responses:
+                status = "✓" if response['success'] else "✗"
+                time_str = f"{response.get('processing_time', 0):.2f}s" if response['success'] else "failed"
+                print(f"DEBUG: {status} {response['model']}: {time_str}")
+            
+            # Check if we have enough successful responses for aggregation
+            if successful_models == 0:
+                raise Exception("All AI models failed to respond. Cannot calculate investment validity.")
+            elif successful_models < 2:
+                print(f"WARNING: Only {successful_models} model(s) responded successfully. Results may be less reliable.")
+            
+            # Calculate time savings vs sequential processing
+            if successful_models > 1:
+                avg_model_time = sum(r.get('processing_time', 0) for r in model_responses if r['success']) / successful_models
+                estimated_sequential_time = avg_model_time * total_models
+                time_saved = estimated_sequential_time - (end_time - start_time)
+                print(f"DEBUG: Estimated time saved: {time_saved:.2f}s ({time_saved/estimated_sequential_time*100:.1f}% faster)")
 
             # Aggregate results and send to final model
             final_result = self._aggregate_model_responses(
@@ -324,6 +337,73 @@ Be specific and actionable in your assessment. Focus on what investment informat
                 "error": f"Investment validity calculation error: {str(e)}",
             }
 
+    def _query_models_parallel(self, models, prompt):
+        """Query multiple models in parallel using ThreadPoolExecutor"""
+        model_responses = []
+        
+        def query_single_model(model):
+            """Query a single model and return structured response"""
+            try:
+                start_time = time.time()
+                response = self._query_model(model["name"], prompt)
+                end_time = time.time()
+                
+                print(f"DEBUG: {model['name']} completed in {end_time - start_time:.2f}s")
+                
+                return {
+                    "model": model["name"],
+                    "weight": model["weight"],
+                    "response": response,
+                    "success": True,
+                    "processing_time": end_time - start_time
+                }
+            except Exception as e:
+                print(f"DEBUG: {model['name']} failed: {str(e)}")
+                return {
+                    "model": model["name"],
+                    "weight": model["weight"],
+                    "response": None,
+                    "success": False,
+                    "error": str(e),
+                    "processing_time": 0
+                }
+        
+        # Use ThreadPoolExecutor for parallel processing
+        # Limit concurrent threads to avoid overwhelming the API and respect rate limits
+        # OpenRouter typically allows multiple concurrent requests
+        max_workers = min(len(models), self.max_concurrent_workers)
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all model queries
+            future_to_model = {
+                executor.submit(query_single_model, model): model 
+                for model in models
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_model):
+                model = future_to_model[future]
+                try:
+                    result = future.result()
+                    model_responses.append(result)
+                except Exception as e:
+                    # This should rarely happen since we handle exceptions in query_single_model
+                    print(f"DEBUG: Unexpected error for {model['name']}: {str(e)}")
+                    model_responses.append({
+                        "model": model["name"],
+                        "weight": model["weight"],
+                        "response": None,
+                        "success": False,
+                        "error": f"Thread execution error: {str(e)}",
+                        "processing_time": 0
+                    })
+        
+        # Sort responses by original model order for consistency
+        model_names_order = [m["name"] for m in models]
+        model_responses.sort(key=lambda x: model_names_order.index(x["model"]))
+        
+        return model_responses
+
     def _query_model(self, model_name, prompt):
         """Query a specific model with the investment prompt"""
         payload = {
@@ -339,8 +419,9 @@ Be specific and actionable in your assessment. Focus on what investment informat
             "temperature": 0.1,
         }
 
+        # Use configurable timeout for model requests
         response = requests.post(
-            self.base_url, headers=self.headers, json=payload, timeout=45
+            self.base_url, headers=self.headers, json=payload, timeout=self.model_timeout
         )
         response.raise_for_status()
 
