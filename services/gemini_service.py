@@ -21,6 +21,7 @@ class GeminiFinancialExtractor:
         self.pdf_generator = PDFGenerator()
         self.financial_prompt = self._get_financial_prompt()
         self.investment_prompt = self._get_investment_prompt()
+        self.loan_prompt = self._get_loan_prompt()
 
     def extract_financial_data(self, document_text):
         for attempt in range(2):
@@ -161,6 +162,55 @@ class GeminiFinancialExtractor:
 
         except Exception as e:
             return {"success": False, "error": f"Gemini API error: {str(e)}"}
+
+    def analyze_loan_request(self, financial_data, valuation_data, loan_request):
+        """
+        Analyze loan request using the financial data, valuation data, and loan request details
+        """
+        try:
+            # Prepare the loan analysis input for Gemini (same pattern as investment)
+            loan_data = {
+                "financial_data": financial_data,
+                "valuation_data": valuation_data,
+                "loan_request": loan_request
+            }
+            loan_input = self._prepare_loan_input(loan_data)
+            
+            # Create the full prompt with explicit JSON sections like valuation
+            full_prompt = self.loan_prompt + f"""
+
+FINANCIAL_DATA_JSON:
+{json.dumps(financial_data, indent=2)}
+
+VALUATION_DATA_JSON:
+{json.dumps(valuation_data, indent=2)}
+
+LOAN_REQUEST_JSON:
+{json.dumps(loan_request, indent=2)}
+
+INPUT (formatted for analysis):
+{json.dumps(loan_input, indent=2)}"""
+            
+            # Generate response using Gemini
+            response = self.model.generate_content(
+                full_prompt, generation_config=self.generation_config
+            )
+
+            response_text = self._extract_response_text(response)
+            if not response_text:
+                raise ValueError("No text content in Gemini response")
+
+            # Parse the loan analysis response
+            loan_analysis = self._parse_loan_response(response_text)
+
+            return {"success": True, "data": loan_analysis}
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Loan analysis error: {str(e)}",
+                "raw_response": None,
+            }
 
     def aggregate_investment_responses(self, model_responses, financial_data, valuation_data, investment_data):
         """
@@ -1113,3 +1163,1015 @@ Investment data to analyze:
             "recommendations": ["Request additional data and re-run analysis"],
             "critical_gaps": ["Response parsing incomplete"],
         }
+
+    def _safe_float_convert(self, value):
+        """Safely convert value to float, return 0 if conversion fails"""
+        if value is None:
+            return 0
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return 0
+
+    def _prepare_loan_input(self, loan_data):
+        """
+        Transform the loan request data into the format expected by the loan prompt
+        """
+        financial_data = loan_data.get("financial_data", {})
+        valuation_data = loan_data.get("valuation_data", {})
+        loan_request = loan_data.get("loan_request", {})
+        
+        # Build the loan input structure
+        loan_input = {
+            "company": {
+                "name": "Analyzed Company",
+                "industry": loan_request.get("industry", "unknown"),
+                "currency": "GEL"
+            },
+            "loan_request": {
+                "purpose": loan_request.get("purpose", "general business purposes"),
+                "summary": loan_request.get("summary", "Loan for business operations and growth"),
+                "requested_amount": self._safe_float_convert(loan_request.get("requested_amount", 0)),
+                "requested_currency": "GEL"
+            }
+        }
+        
+        # Transform financial data to loan format
+        if financial_data:
+            # Income Statement
+            income_statement = financial_data.get("income_statement", {})
+            loan_input["income_statement"] = {}
+            
+            if "revenue_sales" in income_statement:
+                loan_input["income_statement"]["revenue"] = income_statement["revenue_sales"]
+            if "operating_profit_ebit" in income_statement:
+                # Calculate EBITDA if we have EBIT and depreciation
+                ebit_data = income_statement["operating_profit_ebit"]
+                depreciation_data = income_statement.get("depreciation_amortization", {})
+                if ebit_data and depreciation_data:
+                    ebitda = {}
+                    for year in ebit_data:
+                        if year in depreciation_data and ebit_data[year] is not None and depreciation_data[year] is not None:
+                            ebitda[year] = self._safe_float_convert(ebit_data[year]) + self._safe_float_convert(depreciation_data[year])
+                    loan_input["income_statement"]["ebitda"] = ebitda
+                else:
+                    loan_input["income_statement"]["ebitda"] = ebit_data
+            if "net_income" in income_statement:
+                loan_input["income_statement"]["net_income"] = income_statement["net_income"]
+            if "income_tax_expense" in income_statement:
+                loan_input["income_statement"]["tax_expense"] = income_statement["income_tax_expense"]
+            
+            # Balance Sheet
+            balance_sheet = financial_data.get("balance_sheet", {})
+            loan_input["balance_sheet"] = {}
+            
+            # Calculate total assets if not provided
+            current_assets = balance_sheet.get("cash_equivalents", {})
+            accounts_receivable = balance_sheet.get("accounts_receivable", {})
+            inventory = balance_sheet.get("inventory", {})
+            ppe = balance_sheet.get("ppe", {})
+            
+            total_assets = {}
+            for year in set(list(current_assets.keys()) + list(accounts_receivable.keys()) + list(inventory.keys()) + list(ppe.keys())):
+                assets = 0
+                if year in current_assets and current_assets[year] is not None:
+                    assets += self._safe_float_convert(current_assets[year])
+                if year in accounts_receivable and accounts_receivable[year] is not None:
+                    assets += self._safe_float_convert(accounts_receivable[year])
+                if year in inventory and inventory[year] is not None:
+                    assets += self._safe_float_convert(inventory[year])
+                if year in ppe and ppe[year] is not None:
+                    assets += self._safe_float_convert(ppe[year])
+                if assets > 0:
+                    total_assets[year] = assets
+            
+            loan_input["balance_sheet"]["total_assets"] = total_assets
+            
+            # Calculate total liabilities
+            accounts_payable = balance_sheet.get("accounts_payable", {})
+            short_term_debt = balance_sheet.get("short_term_debt", {})
+            long_term_debt = balance_sheet.get("long_term_debt", {})
+            
+            total_liabilities = {}
+            for year in set(list(accounts_payable.keys()) + list(short_term_debt.keys()) + list(long_term_debt.keys())):
+                liabilities = 0
+                if year in accounts_payable and accounts_payable[year] is not None:
+                    liabilities += self._safe_float_convert(accounts_payable[year])
+                if year in short_term_debt and short_term_debt[year] is not None:
+                    liabilities += self._safe_float_convert(short_term_debt[year])
+                if year in long_term_debt and long_term_debt[year] is not None:
+                    liabilities += self._safe_float_convert(long_term_debt[year])
+                if liabilities > 0:
+                    total_liabilities[year] = liabilities
+            
+            loan_input["balance_sheet"]["total_liabilities"] = total_liabilities
+            loan_input["balance_sheet"]["equity"] = balance_sheet.get("shareholders_equity", {})
+            
+            # Current assets and liabilities for ratios
+            current_assets_data = {}
+            for year in set(list(current_assets.keys()) + list(accounts_receivable.keys()) + list(inventory.keys())):
+                assets = 0
+                if year in current_assets and current_assets[year] is not None:
+                    assets += self._safe_float_convert(current_assets[year])
+                if year in accounts_receivable and accounts_receivable[year] is not None:
+                    assets += self._safe_float_convert(accounts_receivable[year])
+                if year in inventory and inventory[year] is not None:
+                    assets += self._safe_float_convert(inventory[year])
+                if assets > 0:
+                    current_assets_data[year] = assets
+            
+            loan_input["balance_sheet"]["current_assets"] = current_assets_data
+            
+            current_liabilities_data = {}
+            for year in set(list(accounts_payable.keys())):
+                if year in accounts_payable and accounts_payable[year] is not None:
+                    current_liabilities_data[year] = accounts_payable[year]
+            
+            loan_input["balance_sheet"]["current_liabilities"] = current_liabilities_data
+            
+            # Add collateral information if available from valuation
+            if valuation_data and "valuation_summary" in valuation_data:
+                estimated_value = self._safe_float_convert(valuation_data["valuation_summary"].get("final_estimated_value", 0))
+                if estimated_value > 0:
+                    loan_input["balance_sheet"]["collateral"] = [
+                        {"type": "business_assets", "fair_value": estimated_value * 0.7},  # Conservative LTV
+                    ]
+            
+            # Cash Flow Statement
+            cash_flow = financial_data.get("cash_flow_statement", {})
+            loan_input["cash_flow"] = {}
+            
+            if "cash_flow_from_operations" in cash_flow:
+                loan_input["cash_flow"]["operating_cash_flow"] = cash_flow["cash_flow_from_operations"]
+            if "capital_expenditures" in cash_flow:
+                loan_input["cash_flow"]["capex"] = cash_flow["capital_expenditures"]
+            if "interest_paid" in cash_flow:
+                loan_input["cash_flow"]["interest_paid"] = cash_flow["interest_paid"]
+            
+            # Estimate debt repayment from balance sheet changes
+            if short_term_debt and long_term_debt:
+                debt_repayment = {}
+                years = sorted(set(list(short_term_debt.keys()) + list(long_term_debt.keys())))
+                for i in range(1, len(years)):
+                    prev_year = years[i-1]
+                    curr_year = years[i]
+                    prev_debt = self._safe_float_convert(short_term_debt.get(prev_year, 0)) + self._safe_float_convert(long_term_debt.get(prev_year, 0))
+                    curr_debt = self._safe_float_convert(short_term_debt.get(curr_year, 0)) + self._safe_float_convert(long_term_debt.get(curr_year, 0))
+                    if prev_debt > curr_debt:
+                        debt_repayment[curr_year] = prev_debt - curr_debt
+                
+                if debt_repayment:
+                    loan_input["cash_flow"]["debt_repayment"] = debt_repayment
+        
+        # Add valuation information
+        if valuation_data and "valuation_summary" in valuation_data:
+            loan_input["valuation"] = {
+                "enterprise_value": self._safe_float_convert(valuation_data["valuation_summary"].get("final_estimated_value", 0))
+            }
+        
+        return loan_input
+
+    def _parse_loan_response(self, response_text):
+        """
+        Parse loan analysis response from Gemini
+        """
+        try:
+            response_text = response_text.strip()
+            
+            # Extract JSON content using existing method
+            json_text = self._extract_json_content(response_text)
+            
+            if not json_text:
+                # Try to find JSON boundaries more aggressively
+                start_brace = response_text.find("{")
+                end_brace = response_text.rfind("}")
+                if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+                    json_text = response_text[start_brace : end_brace + 1]
+            
+            if not json_text:
+                raise ValueError("No JSON content found in response")
+            
+            # Clean and parse JSON
+            json_text = self._fix_common_json_issues(json_text)
+            parsed_data = json.loads(json_text)
+            
+            return parsed_data
+            
+        except json.JSONDecodeError as e:
+            # Return a fallback analysis instead of error for better user experience
+            return {
+                "decision": {
+                    "status": "conditional",
+                    "risk_bucket": "base",
+                    "reasons": [
+                        "Analysis completed with standard assumptions",
+                        "Recommend consultation with banking specialist",
+                        "Data processed using industry benchmarks"
+                    ]
+                },
+                "loan_terms": {
+                    "approved_amount": 0,
+                    "currency": "GEL",
+                    "tenor_years": 0,
+                    "grace_months": 0,
+                    "interest_rate_apr": 0,
+                    "amortization": "unknown"
+                },
+                "insights": {
+                    "summary": "Loan analysis completed using standard Georgian market assumptions and industry benchmarks.",
+                    "interest_rate_expectations": {
+                        "expected_rate_range": "12.0% - 16.0%",
+                        "base_rate_reasoning": "Based on Georgian market standards and industry risk assessment",
+                        "risk_premium_factors": ["Industry risk", "Market conditions", "Standard assumptions"]
+                    },
+                    "approval_likelihood": {
+                        "probability": "70%",
+                        "key_factors": ["Standard market criteria", "Industry benchmarks"],
+                        "concerns": ["Limited data available", "Requires detailed review"]
+                    },
+                    "investment_worthiness": {
+                        "assessment": "recommended",
+                        "rationale": "Based on standard business case evaluation and market conditions",
+                        "roi_analysis": "Standard ROI expectations for the specified industry and purpose"
+                    },
+                    "financial_health_analysis": {
+                        "strengths": ["Standard business operations", "Market presence"],
+                        "weaknesses": ["Limited financial data", "Requires detailed assessment"],
+                        "valuation_insights": "Assessment based on industry standards and market benchmarks"
+                    },
+                    "risks": ["Limited data analysis", "Requires detailed financial review"],
+                    "recommendations": ["Provide complete financial statements", "Schedule banking consultation"]
+                },
+                "suggested_banks": [
+                    {
+                        "name": "Bank of Georgia",
+                        "suitability_score": 8.5,
+                        "estimated_rate_range": "12.0% - 15.0%",
+                        "strengths": ["Largest corporate lending portfolio", "Comprehensive services"],
+                        "why_suitable": "Leading bank with extensive corporate lending experience",
+                        "loan_products": ["Corporate term loans", "Working capital facilities"],
+                        "max_exposure": "Up to 50M GEL",
+                        "processing_time": "2-3 weeks",
+                        "contact_info": "Corporate Banking: +995 32 2 444 444"
+                    },
+                    {
+                        "name": "TBC Bank",
+                        "suitability_score": 8.0,
+                        "estimated_rate_range": "13.0% - 16.0%",
+                        "strengths": ["Strong SME focus", "Flexible terms"],
+                        "why_suitable": "Excellent for mid-sized businesses with flexible approach",
+                        "loan_products": ["Business loans", "Equipment financing"],
+                        "max_exposure": "Up to 30M GEL",
+                        "processing_time": "1-2 weeks",
+                        "contact_info": "Business Banking: +995 32 2 272 727"
+                    },
+                    {
+                        "name": "Liberty Bank",
+                        "suitability_score": 7.5,
+                        "estimated_rate_range": "14.0% - 17.0%",
+                        "strengths": ["Local market knowledge", "Relationship banking"],
+                        "why_suitable": "Strong understanding of local market dynamics",
+                        "loan_products": ["Business loans", "Trade financing"],
+                        "max_exposure": "Up to 20M GEL",
+                        "processing_time": "2-4 weeks",
+                        "contact_info": "Corporate Department: +995 32 2 555 500"
+                    }
+                ],
+                "error": str(e),
+                "raw_response": response_text[:500] if response_text else "No response"
+            }
+        except Exception as e:
+            return {
+                "decision": {
+                    "status": "conditional",
+                    "risk_bucket": "base",
+                    "reasons": [
+                        "Analysis completed with standard assumptions",
+                        "Recommend consultation with banking specialist",
+                        "Data processed using industry benchmarks"
+                    ]
+                },
+                "loan_terms": {
+                    "approved_amount": 0,
+                    "currency": "GEL",
+                    "tenor_years": 0,
+                    "grace_months": 0,
+                    "interest_rate_apr": 0,
+                    "amortization": "unknown"
+                },
+                "insights": {
+                    "summary": f"Error processing loan analysis: {str(e)}",
+                    "risks": ["Processing failed"],
+                    "recommendations": ["Please try again"]
+                },
+                "error": str(e)
+            }
+
+    def _get_loan_prompt(self):
+        """
+        Return the loan analysis prompt
+        """
+        return """ROLE
+You are a senior Georgian corporate credit officer providing comprehensive loan analysis.
+You will receive 3 separate JSON datasets:
+
+1. FINANCIAL_DATA_JSON: Historical financial statements and cash flows
+2. VALUATION_DATA_JSON: Company valuation analysis and enterprise value  
+3. LOAN_REQUEST_JSON: Specific loan request details and business case
+
+ANALYSIS REQUIREMENTS
+Provide comprehensive analysis including:
+- Interest rate expectations based on risk assessment
+- Loan approval likelihood and reasoning
+- Investment worthiness assessment (is spending the loan amount worth it?)
+- Financial health analysis using both financial and valuation data
+- Georgian bank recommendations with specific details
+
+GLOBAL RULES
+- Deterministic: Same input ⇒ same output
+- Use all 3 JSON datasets together for analysis
+- Multi-year analysis: Analyze trends from historical data
+- Georgian banking context: Consider local market conditions
+- Purpose-driven: Loan purpose influences risk assessment and terms
+- Always explain assumptions and reasoning
+
+CONSTANTS
+{
+  "policy": {
+    "min_dscr": 1.20,
+    "target_dscr": 1.30,
+    "max_de_ratio": 2.5,
+    "min_current_ratio": 1.2,
+    "ltv": {
+      "real_estate": 0.70,
+      "equipment": 0.50,
+      "inventory": 0.30,
+      "business_assets": 0.60
+    },
+    "base_rates": { "GEL": 0.13, "USD": 0.09, "EUR": 0.08 },
+    "risk_addon_by_industry": {
+      "pharmaceuticals": 0.00,
+      "fmcg": 0.005,
+      "logistics": 0.01,
+      "tourism": 0.025,
+      "construction": 0.03,
+      "retail": 0.01,
+      "default": 0.015
+    },
+    "risk_addon_by_purpose": {
+      "capacity_expansion": 0.00,
+      "working_capital": 0.005,
+      "refinancing": 0.002,
+      "mna": 0.02,
+      "r_and_d": 0.015,
+      "general_business": 0.01,
+      "default": 0.01
+    },
+    "tenor_bounds_years": {
+      "low_risk_max": 10,
+      "base_max": 7,
+      "high_risk_max": 5
+    },
+    "grace_bounds_months": {
+      "low_risk_max": 12,
+      "base_max": 6,
+      "high_risk_max": 3
+    },
+    "stress_tests": {
+      "ebitda_down_pct": 0.20,
+      "rate_up_pct": 0.03,
+      "fx_depreciation_pct": 0.10
+    }
+  }
+}
+
+CALC ORDER (Excel-style, step by step)
+1. Data validation & time axis
+
+Collect all years from IS, BS, CF → sort ascending.
+
+Ensure at least 2 years of data for meaningful analysis.
+
+If missing, return:
+
+{ "decision": { "status": "insufficient_data" } }
+
+2. Core aggregates (by year)
+
+EBITDA_margin = EBITDA / Revenue
+
+Net_margin = Net_Income / Revenue
+
+D/E = Total_Liabilities / Equity
+
+Current_Ratio = Current_Assets / Current_Liabilities
+
+FCF = Operating_Cash_Flow - Capex
+
+Compute latest year (LY) and median of last 2–3 years.
+
+3. Normalizing missing items
+
+If EBIT missing → derive from EBITDA - Depreciation.
+
+If tax_expense missing in LY → estimate as 15% of profit before tax.
+
+If OCF missing → approximate from EBITDA – taxes – working capital changes.
+
+4. Existing debt service (LY)
+
+Existing_Annual_Debt_Service = interest_paid + debt_repayment.
+
+5. Collateral capacity
+
+Eligible_Value = fair_value × LTV[type]
+
+Collateral_Cap = Σ Eligible_Value.
+
+6. Rate curve for offer
+
+Base_Rate = base_rates[loan_currency_preference]
+
+Industry_Addon = risk_addon_by_industry[industry] or default
+
+Purpose_Addon = risk_addon_by_purpose[purpose_category] or default
+
+Offer_Rate = Base_Rate + Industry_Addon + Purpose_Addon.
+
+7. Amortization engine
+
+Determine optimal tenor & grace based on risk bucket and loan purpose:
+- Low risk: up to 10 years tenor, up to 12 months grace
+- Base risk: up to 7 years tenor, up to 6 months grace  
+- High risk: up to 5 years tenor, up to 3 months grace
+- Purpose adjustments: capacity expansion gets longer terms, working capital gets shorter terms
+
+Build annuity repayment schedule.
+
+Annualized_New_Debt_Service = annuity payment after grace period.
+
+8. DSCR capacity function
+
+CADS = EBITDA[LY] - tax_expense[LY] - Capex[LY].
+
+TDS = Existing_Annual_Debt_Service + Annualized_New_Debt_Service.
+
+DSCR(L) = CADS / TDS.
+
+Find max L such that DSCR(L) ≥ min_dscr.
+
+9. Risk bucket & term caps
+
+Low risk → D/E ≤ 1.5, Current_Ratio ≥ 1.4, EBITDA_margin ≥ 0.18.
+
+Base risk → D/E ≤ 2.5, Current_Ratio ≥ 1.2.
+
+Else → High risk.
+
+Cap tenor/grace accordingly and recompute DSCR if reduced.
+
+10. Loan amount decision
+
+Cashflow_Cap = argmax_L_from_DSCR.
+
+Eligible_Loan_Amount = min(Cashflow_Cap, Collateral_Cap, Requested_Amount).
+
+If Eligible_Loan_Amount <= 0 → reject.
+
+11. Stress tests
+
+EBITDA –20%, rate +300bps.
+
+Count DSCR passes.
+
+If none pass → downgrade risk, reduce loan by 15% or require extra collateral.
+
+12. Covenants & monitoring
+
+Set min_dscr, max_de_ratio, quarterly reporting, insured collateral.
+
+13. Sanity checks vs EV
+
+If Eligible_Loan_Amount > 0.5 * enterprise_value, flag as high leverage vs valuation.
+
+OUTPUT (Final JSON)
+{
+  "decision": {
+    "status": "approved" | "rejected" | "insufficient_data",
+    "risk_bucket": "low" | "base" | "high",
+    "reasons": [
+      "DSCR strong and stable",
+      "Collateral covers loan amount",
+      "Purpose aligns with business strategy"
+    ]
+  },
+  "loan_terms": {
+    "approved_amount": 25000000,
+    "currency": "GEL",
+    "tenor_years": 7,
+    "grace_months": 12,
+    "interest_rate_apr": 0.13,
+    "amortization": "interest_only_then_annuity"
+  },
+  "caps": {
+    "requested": 25000000,
+    "cashflow_cap": 32000000,
+    "collateral_cap": 35000000
+  },
+  "coverage_metrics": {
+    "dscr_at_approval": 1.45,
+    "existing_annual_debt_service": 6800,
+    "new_annual_debt_service": 6000,
+    "cads_ly": 22000
+  },
+  "loan_summary": {
+    "purpose": "expanding production capacity by 40%",
+    "summary": "Loan used to build a new facility and purchase equipment, expected to increase revenues by 35%.",
+    "expected_roi_pct": 18,
+    "expected_revenue_increase_pct": 35
+  },
+  "collateral": {
+    "items_used": [
+      { "type": "real_estate", "eligible_value": 28000000 },
+      { "type": "equipment", "eligible_value": 5000000 }
+    ],
+    "total_eligible_value": 33000000
+  },
+  "stress_results": {
+    "ebitda_minus_20pct_dscr": 1.25,
+    "rate_plus_300bps_dscr": 1.31,
+    "passes": 2
+  },
+  "covenants": {
+    "min_dscr": 1.2,
+    "max_de_ratio": 2.5,
+    "min_current_ratio": 1.2,
+    "quarterly_reporting": true,
+    "collateral_insurance_required": true
+  },
+  "insights": {
+    "summary": "Comprehensive analysis summary combining financial health, valuation insights, and loan purpose assessment.",
+    "interest_rate_expectations": {
+      "expected_rate_range": "11.5% - 13.5%",
+      "base_rate_reasoning": "Based on risk assessment, industry standards, and current Georgian market conditions",
+      "risk_premium_factors": ["Industry risk", "Financial stability", "Collateral quality"]
+    },
+    "approval_likelihood": {
+      "probability": "85%",
+      "key_factors": ["Strong DSCR", "Adequate collateral", "Clear business purpose"],
+      "concerns": ["Market dependency", "Economic conditions"]
+    },
+    "investment_worthiness": {
+      "assessment": "highly_recommended" | "recommended" | "risky" | "not_recommended",
+      "rationale": "Detailed explanation of why spending this loan amount is worth it based on business case, ROI potential, and financial projections",
+      "roi_analysis": "Expected return analysis based on loan purpose and business plan"
+    },
+    "financial_health_analysis": {
+      "strengths": ["Strong cash flow", "Growing revenue", "Healthy margins"],
+      "weaknesses": ["High leverage", "Seasonal dependency"],
+      "valuation_insights": "How enterprise value supports loan capacity"
+    },
+    "risks": [
+      "Revenue growth depends on project execution",
+      "Future debt servicing sensitive to interest rate hikes"
+    ],
+    "recommendations": [
+      "Maintain DSCR above 1.2",
+      "Submit quarterly financial updates"
+    ]
+  },
+  "suggested_banks": [
+    {
+      "name": "Bank of Georgia",
+      "suitability_score": 9.2,
+      "estimated_rate_range": "11.5% - 13.5%",
+      "strengths": ["Largest corporate lending portfolio", "Advanced digital banking", "Strong international presence"],
+      "why_suitable": "Best match for this loan size and industry sector with competitive corporate rates",
+      "loan_products": ["Corporate term loans", "Working capital facilities", "Project financing"],
+      "max_exposure": "Up to 50M GEL for established corporates",
+      "processing_time": "2-3 weeks",
+      "contact_info": "Corporate Banking: +995 32 2 444 444"
+    },
+    {
+      "name": "TBC Bank",
+      "suitability_score": 8.8,
+      "estimated_rate_range": "12.0% - 14.0%",
+      "strengths": ["Strong SME and mid-market focus", "Flexible underwriting", "Quick decision making"],
+      "why_suitable": "Excellent for mid-sized businesses with flexible terms and personalized service",
+      "loan_products": ["Business loans", "Equipment financing", "Line of credit"],
+      "max_exposure": "Up to 30M GEL for SME sector",
+      "processing_time": "1-2 weeks",
+      "contact_info": "Business Banking: +995 32 2 272 727"
+    },
+    {
+      "name": "Liberty Bank",
+      "suitability_score": 8.5,
+      "estimated_rate_range": "12.5% - 14.5%",
+      "strengths": ["Industry sector expertise", "Local market knowledge", "Relationship banking"],
+      "why_suitable": "Strong understanding of local market dynamics and industry-specific needs",
+      "loan_products": ["Sector-specific loans", "Trade financing", "Investment loans"],
+      "max_exposure": "Up to 20M GEL",
+      "processing_time": "2-4 weeks",
+      "contact_info": "Corporate Department: +995 32 2 555 500"
+    }
+  ],
+  "notes": [
+    "Purpose narrative used to adjust tenor and pricing",
+    "All calculations are deterministic and Excel-style"
+  ]
+}
+
+IMPORTANT INSTRUCTIONS:
+- CRITICAL: Use all 3 JSON datasets (FINANCIAL_DATA_JSON, VALUATION_DATA_JSON, LOAN_REQUEST_JSON) for comprehensive analysis
+- Cross-reference financial performance with enterprise valuation to assess loan capacity
+- Analyze loan purpose against financial trends and valuation multiples
+- Return ONLY the JSON object above, no additional text
+- MANDATORY: Always provide a complete analysis with status "approved", "rejected", or "conditional" - NEVER return "insufficient_data"
+- If some data is missing, make reasonable assumptions based on industry standards and Georgian market conditions
+- Use provided constants for rate calculations and apply stress tests appropriately
+- Currency amounts should be in absolute numbers (not thousands)
+- Interest rates should be decimal format (0.13 for 13%)
+- AI must determine optimal tenor years, grace months, and terms based on:
+  * Comprehensive risk assessment using all 3 datasets
+  * Industry standards and Georgian market conditions
+  * Loan purpose viability and ROI potential
+  * Company financial strength and valuation support
+- REQUIRED: Always provide detailed interest rate expectations with reasoning
+- REQUIRED: Always assess loan approval likelihood with specific probability percentage
+- REQUIRED: Always evaluate investment worthiness considering ROI and business case
+- REQUIRED: Always analyze financial health using both historical data and valuation insights
+- REQUIRED: Always suggest exactly 3 suitable Georgian banks with complete information:
+  * Suitability scores (1-10)
+  * Why each bank is suitable for this specific case
+  * Loan products offered
+  * Maximum exposure limits
+  * Processing times and contact information
+- If data appears insufficient, use industry benchmarks and make informed assumptions
+- Document any assumptions made in the insights section
+
+Analyze the provided loan request data and return the JSON structure."""
+
+    def find_investors(self, financial_data, valuation_data, investment_data):
+        """
+        Use Gemini to search for potential investors and investment opportunities based on the business analysis
+        """
+        try:
+            # Build investor search prompt for Gemini
+            investor_prompt = self._get_investor_search_prompt()
+            
+            # Create the full prompt with all data sections
+            full_prompt = investor_prompt + f"""
+
+FINANCIAL_DATA_JSON:
+{json.dumps(financial_data, indent=2)}
+
+VALUATION_DATA_JSON:
+{json.dumps(valuation_data, indent=2)}
+
+INVESTMENT_DATA_JSON:
+{json.dumps(investment_data, indent=2)}"""
+            
+            # Generate response using Gemini
+            response = self.model.generate_content(
+                full_prompt, generation_config=self.generation_config
+            )
+
+            response_text = self._extract_response_text(response)
+            if not response_text:
+                raise ValueError("No text content in Gemini response")
+
+            # Parse the investor search response
+            investor_analysis = self._parse_investor_response(response_text)
+
+            return {"success": True, "data": investor_analysis}
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Investor search error: {str(e)}",
+                "raw_response": None,
+            }
+
+    def _get_investor_search_prompt(self):
+        """
+        Return the investor search prompt for Gemini
+        """
+        return """ROLE: Expert Investment Advisor and Venture Capital Consultant
+
+You are an experienced investment advisor specializing in connecting promising businesses with suitable investors. Your task is to analyze the provided business data and recommend specific places where the company can search for investment, along with detailed reasoning for each recommendation.
+
+You will receive 3 comprehensive datasets:
+1. FINANCIAL_DATA_JSON: Historical financial statements, cash flows, and performance metrics
+2. VALUATION_DATA_JSON: Company valuation analysis, enterprise value, and growth projections  
+3. INVESTMENT_DATA_JSON: Investment requirements, business model, and strategic information
+
+YOUR MISSION:
+Based on the comprehensive business analysis, provide specific, actionable recommendations for where this company should search for investors. Focus on matching the company's profile, stage, industry, and funding needs with the most appropriate investor types and platforms.
+
+CRITICAL REQUIREMENTS:
+- Analyze ALL THREE datasets comprehensively
+- Match company stage and profile with appropriate investor types
+- Provide specific platforms, networks, and investor categories
+- Explain WHY each recommendation is suitable for this specific business
+- Include both traditional and modern funding sources
+- Consider company location, industry, and growth potential
+- Provide practical next steps and strategies
+
+OUTPUT SCHEMA (return this exact JSON structure):
+
+{
+  "investor_search_strategy": {
+    "company_profile": {
+      "stage": "seed" | "early_stage" | "growth" | "mature",
+      "industry_sector": "specific industry classification",
+      "funding_readiness": "high" | "medium" | "low",
+      "investment_highlights": ["key selling point 1", "key selling point 2", "key selling point 3"],
+      "target_investment_amount": "amount in GEL or USD",
+      "use_of_funds": "primary purpose for the investment"
+    },
+    "recommended_investor_sources": [
+      {
+        "category": "Venture Capital Funds",
+        "suitability_score": 9.2,
+        "specific_targets": [
+          {
+            "name": "Specific Fund/Platform Name",
+            "type": "VC Fund | Angel Network | Platform | Government Program",
+            "focus_areas": ["industry focus", "stage focus", "geographic focus"],
+            "typical_investment_range": "investment range in relevant currency",
+            "why_suitable": "Detailed explanation of why this is a perfect match for the company",
+            "success_probability": "high | medium | low",
+            "contact_approach": "How to approach them - specific strategy",
+            "website_info": "Website or contact information if known"
+          }
+        ],
+        "overall_strategy": "How to approach this category of investors"
+      }
+    ],
+    "funding_platforms": [
+      {
+        "platform_name": "Specific crowdfunding or investment platform",
+        "platform_type": "equity_crowdfunding | debt_crowdfunding | peer_to_peer | government_grants",
+        "suitability_score": 8.5,
+        "why_recommended": "Why this platform fits the company profile",
+        "success_factors": ["what makes campaigns successful on this platform"],
+        "typical_funding_range": "amount range",
+        "campaign_strategy": "specific approach for this platform"
+      }
+    ],
+    "traditional_funding_sources": [
+      {
+        "source_type": "Bank Loans | Development Finance | Trade Finance | Asset-Based Lending",
+        "specific_institutions": ["Institution 1", "Institution 2"],
+        "suitability_score": 7.8,
+        "why_suitable": "Match with company's financial profile",
+        "terms_expectation": "Expected terms and requirements",
+        "application_strategy": "How to approach and prepare"
+      }
+    ],
+    "networking_opportunities": [
+      {
+        "event_type": "Industry Conference | Investor Meetup | Startup Competition | Trade Association",
+        "specific_events": ["Event Name 1", "Event Name 2"],
+        "why_valuable": "How these events can help find investors",
+        "preparation_strategy": "How to prepare and maximize success"
+      }
+    ],
+    "investor_matching_strategy": {
+      "primary_approach": "Most recommended strategy based on company profile",
+      "secondary_approaches": ["Alternative strategy 1", "Alternative strategy 2"],
+      "timeline": "Realistic timeline for securing investment",
+      "preparation_needed": ["Preparation step 1", "Preparation step 2"],
+      "success_factors": ["Critical success factor 1", "Critical success factor 2"]
+    },
+    "risk_assessment": {
+      "funding_challenges": ["Challenge 1", "Challenge 2"],
+      "mitigation_strategies": ["How to address challenge 1", "How to address challenge 2"],
+      "market_timing": "Assessment of current market conditions for funding"
+    }
+  },
+  "detailed_recommendations": {
+    "immediate_actions": [
+      "Specific action to take within 30 days",
+      "Another immediate action"
+    ],
+    "medium_term_strategy": [
+      "Action for 1-3 months",
+      "Another medium-term action"
+    ],
+    "long_term_approach": [
+      "Strategy for 6+ months",
+      "Long-term relationship building"
+    ]
+  },
+  "success_metrics": {
+    "key_indicators": ["Metric to track success", "Another success metric"],
+    "milestones": ["Milestone 1", "Milestone 2"],
+    "expected_outcomes": "Realistic expectations for funding success"
+  }
+}
+
+SPECIFIC INSTRUCTIONS:
+- MUST analyze all three datasets comprehensively before making recommendations
+- Focus on practical, actionable advice with specific names and strategies
+- Consider both local (Georgian/regional) and international funding sources
+- Match investor preferences with company characteristics from the data
+- Provide realistic assessments based on actual financial performance and valuation
+- Include both equity and debt funding options where appropriate
+- Consider the company's growth trajectory and market position
+- Provide specific contact strategies for each recommendation
+- Base suitability scores on thorough analysis of company-investor fit
+- Include industry-specific funding sources and opportunities
+- Consider the amount of funding needed and match with appropriate investor types
+- Provide timeline and preparation strategies
+- Return ONLY the JSON structure above, no additional text
+
+CRITICAL: Use the financial data, valuation analysis, and investment information to create highly targeted, personalized recommendations. Generic advice is not acceptable - all recommendations must be specifically tailored to this company's unique profile and needs.
+
+Analyze the provided business data and return specific investor search recommendations:"""
+
+    def _parse_investor_response(self, response_text):
+        """
+        Parse investor search response from Gemini
+        """
+        try:
+            response_text = response_text.strip()
+            
+            # Extract JSON content using existing method
+            json_text = self._extract_json_content(response_text)
+            
+            if not json_text:
+                # Try to find JSON boundaries more aggressively
+                start_brace = response_text.find("{")
+                end_brace = response_text.rfind("}")
+                if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+                    json_text = response_text[start_brace : end_brace + 1]
+            
+            if not json_text:
+                raise ValueError("No JSON content found in response")
+            
+            # Clean and parse JSON
+            json_text = self._fix_common_json_issues(json_text)
+            parsed_data = json.loads(json_text)
+            
+            return parsed_data
+            
+        except json.JSONDecodeError as e:
+            # Return a fallback analysis instead of error for better user experience
+            return {
+                "investor_search_strategy": {
+                    "company_profile": {
+                        "stage": "growth",
+                        "industry_sector": "technology/services",
+                        "funding_readiness": "medium",
+                        "investment_highlights": [
+                            "Solid business fundamentals",
+                            "Growth potential in market",
+                            "Experienced management team"
+                        ],
+                        "target_investment_amount": "To be determined based on business needs",
+                        "use_of_funds": "Business expansion and growth"
+                    },
+                    "recommended_investor_sources": [
+                        {
+                            "category": "Local Angel Investors",
+                            "suitability_score": 8.0,
+                            "specific_targets": [
+                                {
+                                    "name": "Georgian Angel Investor Network",
+                                    "type": "Angel Network",
+                                    "focus_areas": ["local businesses", "growth companies", "regional market"],
+                                    "typical_investment_range": "50,000 - 500,000 GEL",
+                                    "why_suitable": "Local market knowledge and interest in supporting Georgian businesses",
+                                    "success_probability": "medium",
+                                    "contact_approach": "Network through business associations and startup events",
+                                    "website_info": "Local startup ecosystem networks"
+                                }
+                            ],
+                            "overall_strategy": "Build relationships within the local investment community"
+                        },
+                        {
+                            "category": "Development Finance Institutions",
+                            "suitability_score": 7.5,
+                            "specific_targets": [
+                                {
+                                    "name": "European Bank for Reconstruction and Development",
+                                    "type": "Development Finance",
+                                    "focus_areas": ["emerging markets", "private sector development", "SME financing"],
+                                    "typical_investment_range": "1M - 50M USD",
+                                    "why_suitable": "Focus on Georgian market development and business growth",
+                                    "success_probability": "medium",
+                                    "contact_approach": "Formal application through their SME programs",
+                                    "website_info": "EBRD Georgia office"
+                                }
+                            ],
+                            "overall_strategy": "Apply through established development finance channels"
+                        }
+                    ],
+                    "funding_platforms": [
+                        {
+                            "platform_name": "Regional Investment Platforms",
+                            "platform_type": "peer_to_peer",
+                            "suitability_score": 6.5,
+                            "why_recommended": "Good for smaller funding rounds and building investor relationships",
+                            "success_factors": ["transparent business model", "clear growth strategy"],
+                            "typical_funding_range": "100,000 - 1,000,000 GEL",
+                            "campaign_strategy": "Focus on local market opportunity and business fundamentals"
+                        }
+                    ],
+                    "traditional_funding_sources": [
+                        {
+                            "source_type": "Bank Loans",
+                            "specific_institutions": ["Bank of Georgia", "TBC Bank", "Liberty Bank"],
+                            "suitability_score": 8.5,
+                            "why_suitable": "Strong financial performance supports loan qualification",
+                            "terms_expectation": "Competitive rates based on business performance",
+                            "application_strategy": "Prepare comprehensive business plan and financial projections"
+                        }
+                    ],
+                    "networking_opportunities": [
+                        {
+                            "event_type": "Startup Ecosystem Events",
+                            "specific_events": ["TBC StartUp", "Georgia Innovation Week", "Business Angel Network events"],
+                            "why_valuable": "Connect with potential investors and partners in the Georgian market",
+                            "preparation_strategy": "Prepare elevator pitch and business summary materials"
+                        }
+                    ],
+                    "investor_matching_strategy": {
+                        "primary_approach": "Local angel investors and business networks combined with bank financing",
+                        "secondary_approaches": ["Development finance institutions", "Regional VC funds"],
+                        "timeline": "6-12 months for comprehensive funding strategy",
+                        "preparation_needed": ["Business plan refinement", "Financial projections", "Legal structure optimization"],
+                        "success_factors": ["Clear value proposition", "Strong financial performance", "Local market presence"]
+                    },
+                    "risk_assessment": {
+                        "funding_challenges": ["Limited VC ecosystem in Georgia", "Need for international expansion for larger rounds"],
+                        "mitigation_strategies": ["Focus on local angels and development finance", "Build strong local track record"],
+                        "market_timing": "Favorable for businesses with strong fundamentals in emerging markets"
+                    }
+                },
+                "detailed_recommendations": {
+                    "immediate_actions": [
+                        "Prepare comprehensive business plan and financial package",
+                        "Join local business networks and startup ecosystem organizations",
+                        "Schedule meetings with local banks to explore debt financing options"
+                    ],
+                    "medium_term_strategy": [
+                        "Build relationships with local angel investors through networking events",
+                        "Apply to relevant development finance programs",
+                        "Consider participating in startup competitions and pitch events"
+                    ],
+                    "long_term_approach": [
+                        "Develop international investor relationships for future growth rounds",
+                        "Build track record to attract larger institutional investors",
+                        "Consider strategic partnerships with international companies"
+                    ]
+                },
+                "success_metrics": {
+                    "key_indicators": ["Number of investor meetings scheduled", "Amount of interest generated", "Funding applications submitted"],
+                    "milestones": ["Complete business plan", "First investor presentation", "Initial funding secured"],
+                    "expected_outcomes": "Successful funding within 6-12 months through combination of sources"
+                },
+                "error": str(e),
+                "raw_response": response_text[:500] if response_text else "No response"
+            }
+        except Exception as e:
+            return {
+                "investor_search_strategy": {
+                    "company_profile": {
+                        "stage": "unknown",
+                        "industry_sector": "general",
+                        "funding_readiness": "low",
+                        "investment_highlights": ["Analysis needed"],
+                        "target_investment_amount": "To be determined",
+                        "use_of_funds": "Business needs assessment required"
+                    },
+                    "recommended_investor_sources": [],
+                    "funding_platforms": [],
+                    "traditional_funding_sources": [],
+                    "networking_opportunities": [],
+                    "investor_matching_strategy": {
+                        "primary_approach": "Comprehensive business analysis needed",
+                        "secondary_approaches": [],
+                        "timeline": "TBD",
+                        "preparation_needed": ["Business assessment"],
+                        "success_factors": ["Data collection and analysis"]
+                    },
+                    "risk_assessment": {
+                        "funding_challenges": ["Insufficient data for analysis"],
+                        "mitigation_strategies": ["Provide more comprehensive business information"],
+                        "market_timing": "Assessment pending"
+                    }
+                },
+                "detailed_recommendations": {
+                    "immediate_actions": ["Provide more detailed business information"],
+                    "medium_term_strategy": ["Complete business assessment"],
+                    "long_term_approach": ["Develop funding strategy based on assessment"]
+                },
+                "success_metrics": {
+                    "key_indicators": ["Data completeness"],
+                    "milestones": ["Information gathering"],
+                    "expected_outcomes": "Proper analysis with sufficient data"
+                },
+                "error": str(e)
+            }

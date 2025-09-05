@@ -6,6 +6,7 @@ from routes.evaluation import evaluation_bp
 from routes.pdf import pdf_bp
 from routes.valuation import valuation_bp
 from routes.investment import investment_bp
+from routes.loan import loan_bp
 
 
 def create_app():
@@ -29,6 +30,7 @@ def create_app():
     app.register_blueprint(pdf_bp)
     app.register_blueprint(valuation_bp)
     app.register_blueprint(investment_bp)
+    app.register_blueprint(loan_bp)
 
     return app
 
