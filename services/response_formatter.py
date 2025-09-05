@@ -21,7 +21,6 @@ class ResponseFormatter:
         pdf_result=None,
         file_count=1,
         processed_files=None,
-        original_text_content=None,
     ):
         response_data = {
             "message": "success",
@@ -32,10 +31,6 @@ class ResponseFormatter:
 
         if processed_files:
             response_data["processed_files"] = processed_files
-            
-        # Include original text content for later use in validity/investment analysis
-        if original_text_content:
-            response_data["original_text_content"] = original_text_content
 
         if financial_analysis and financial_analysis.get("success"):
             response_data["success"] = True
@@ -60,7 +55,7 @@ class ResponseFormatter:
 
     @staticmethod
     def format_investment_response(
-        filename, text_length, investment_analysis, file_count=1, processed_files=None, original_text_content=None
+        filename, text_length, investment_analysis, file_count=1, processed_files=None
     ):
         response_data = {
             "message": "success",
@@ -71,10 +66,6 @@ class ResponseFormatter:
 
         if processed_files:
             response_data["processed_files"] = processed_files
-            
-        # Include original text content for later use in validity analysis
-        if original_text_content:
-            response_data["original_text_content"] = original_text_content
 
         if investment_analysis and investment_analysis.get("success"):
             response_data["success"] = True

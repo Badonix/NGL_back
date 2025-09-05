@@ -82,7 +82,6 @@ def analyze_investment_files():
             investment_analysis=investment_analysis,
             file_count=len(processed_files),
             processed_files=filenames,
-            original_text_content=combined_text,
         )
 
     except Exception as e:
@@ -268,7 +267,6 @@ def calculate_investment_validity():
         financial_data = None
         valuation_data = None
         investment_data = None
-        original_text_content = None
         
         if is_multipart:
             # Handle multipart form data (with potential file uploads)
@@ -319,8 +317,6 @@ def calculate_investment_validity():
             except json.JSONDecodeError:
                 pass
 
-            # Get original text content from initial financial analysis
-            original_text_content = request.form.get("original_text_content", "").strip()
 
         elif is_json:
             # Handle pure JSON data (legacy support)
@@ -329,7 +325,6 @@ def calculate_investment_validity():
                 financial_data = data.get("financial_data")
                 valuation_data = data.get("valuation_data")
                 investment_data = data.get("investment_data")
-                original_text_content = data.get("original_text_content", "")
         else:
             return ErrorHandler.validation_error("Unsupported content type. Use multipart/form-data or application/json.")
 
@@ -339,37 +334,16 @@ def calculate_investment_validity():
                 "Financial data, valuation data, and investment data are all required"
             )
 
-        # Combine original text content with any new files
-        combined_content_for_analysis = ""
-        
-        # Add original text from initial financial analysis
-        if original_text_content:
-            combined_content_for_analysis += "--- ORIGINAL FINANCIAL DATA ---\n\n"
-            combined_content_for_analysis += original_text_content
-            
-        # Add any additional files uploaded for this analysis
+        # Add any additional files uploaded for this analysis to investment data
         if additional_file_text:
-            if combined_content_for_analysis:
-                combined_content_for_analysis += "\n\n"
-            combined_content_for_analysis += additional_file_text
-            
-        # Enhance investment data with combined content
-        if combined_content_for_analysis:
             if not isinstance(investment_data, dict):
                 investment_data = {}
             
-            investment_data["all_file_content"] = combined_content_for_analysis
-            investment_data["has_original_files"] = bool(original_text_content)
+            investment_data["additional_file_content"] = additional_file_text
             investment_data["additional_files_count"] = len(processed_files)
-            
-            content_sources = []
-            if original_text_content:
-                content_sources.append("original financial data")
-            if additional_file_text:
-                content_sources.append(f"{len(processed_files)} additional files")
                 
-            print(f"DEBUG VALIDITY: Combined content from: {', '.join(content_sources)}")
-            print(f"DEBUG VALIDITY: Total combined content length: {len(combined_content_for_analysis):,} characters")
+            print(f"DEBUG VALIDITY: Added {len(processed_files)} additional files")
+            print(f"DEBUG VALIDITY: Additional content length: {len(additional_file_text):,} characters")
 
         if openrouter_service:
             validity_result = openrouter_service.calculate_investment_validity(

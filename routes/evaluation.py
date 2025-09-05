@@ -72,7 +72,6 @@ def evaluate():
             financial_analysis=financial_analysis,
             file_count=len(processed_files),
             processed_files=filenames,
-            original_text_content=combined_text,
         )
 
     except Exception as e:
