@@ -144,6 +144,23 @@ class ResponseFormatter:
         return jsonify(response_data), 200
 
     @staticmethod
+    def format_startup_response(startup_result):
+        if startup_result.get("success"):
+            response_data = {
+                "success": True,
+                "message": "Startup analysis completed",
+                "data": startup_result.get("data", {}),
+            }
+        else:
+            response_data = {
+                "success": False,
+                "message": "Startup analysis failed",
+                "error": startup_result.get("error", "Unknown error occurred"),
+            }
+
+        return jsonify(response_data), 200
+
+    @staticmethod
     def _format_pdf_info(pdf_result):
         if not pdf_result:
             return {"available": False, "error": "No PDF generation attempted"}

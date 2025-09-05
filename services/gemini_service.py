@@ -2175,3 +2175,308 @@ Analyze the provided business data and return specific investor search recommend
                 },
                 "error": str(e)
             }
+
+    def analyze_startup(self, startup_description, flags=None):
+        """
+        Use Gemini to analyze startup description and provide comprehensive analysis
+        including valuation, competitive landscape, and investor discovery
+        """
+        try:
+            startup_prompt = self._get_startup_analysis_prompt()
+            
+            # Prepare input data
+            input_data = {
+                "startup_description": startup_description,
+                "flags": flags or {
+                    "browse_enabled": True,
+                    "include_competitive": True,
+                    "include_investors": True
+                }
+            }
+            
+            full_prompt = startup_prompt + f"""
+INPUT:
+{json.dumps(input_data, indent=2)}
+"""
+            
+            response = self.model.generate_content(
+                full_prompt, generation_config=self.generation_config
+            )
+            response_text = self._extract_response_text(response)
+            
+            if not response_text:
+                raise ValueError("No text content in Gemini response")
+            
+            startup_analysis = self._parse_startup_response(response_text)
+            return {"success": True, "data": startup_analysis}
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Startup analysis error: {str(e)}",
+                "raw_response": None,
+            }
+
+    def _get_startup_analysis_prompt(self):
+        """
+        Return the startup analysis prompt for Gemini
+        """
+        return """ROLE
+You are a venture valuation analyst, investment strategist, and investor discovery assistant.
+From a single free-text startup description, you must:
+
+1. Extract all structured inputs automatically.
+2. Detect the startup stage → Pre-revenue, Early-revenue, Growth-stage.
+3. Generate projections using sector constants if missing.
+4. Perform deterministic valuations using VC, Scorecard, Berkus, DCF, and Comps.
+5. Suggest ideal investment amount and investor equity %.
+6. Provide competitor benchmarking insights.
+7. Discover investors, accelerators, and grants based on startup sector and region.
+8. Detect when data is insufficient and return a checklist of missing items.
+9. Provide precision suggestions for improving accuracy.
+
+You must return either Case 1 (sufficient data) or Case 2 (insufficient data) in valid JSON format.
+
+OUTPUT — STRICT JSON
+Case 1 — Sufficient Data
+{
+  "status": "success",
+  "valuation_summary": {
+    "final_estimated_value": 14000000,
+    "valuation_range": {
+      "low": 12000000,
+      "high": 16000000,
+      "mid": 14000000
+    },
+    "methodology_breakdown": {
+      "vc_ev": 14500000,
+      "scorecard_ev": 12000000,
+      "berkus_ev": 11000000,
+      "dcf_ev": 13800000,
+      "comps_ev": 15000000
+    }
+  },
+  "investment_strategy": {
+    "ideal_investment_amount": 1200000,
+    "suggested_investor_equity": 0.18,
+    "founder_equity_retention_post_round": 0.82
+  },
+  "competitive_landscape": {
+    "competitors": [
+      {
+        "name": "CompetitorName",
+        "country": "Country",
+        "stage_or_round": "Series A",
+        "funding": "₾3.2M",
+        "valuation": "₾12M",
+        "positioning": "Brief description",
+        "source": "crunchbase.com"
+      }
+    ],
+    "pros_cons_vs_competitors": {
+      "pros": ["Advantage 1", "Advantage 2"],
+      "cons": ["Challenge 1", "Challenge 2"],
+      "opportunities": ["Opportunity 1", "Opportunity 2"],
+      "threats": ["Threat 1", "Threat 2"]
+    }
+  },
+  "investor_discovery": {
+    "target_investors": [
+      {
+        "name": "Investor Name",
+        "type": "VC Fund",
+        "stage_focus": "Seed, Series A",
+        "sector_focus": "SaaS, Tech",
+        "ticket_size": "₾200K - ₾1.5M",
+        "notable_investments": ["Portfolio1", "Portfolio2"],
+        "website": "https://investor.com"
+      }
+    ],
+    "regional_programs": [
+      {
+        "name": "Program Name",
+        "type": "accelerator",
+        "focus": "Early-stage tech",
+        "website": "https://program.com"
+      }
+    ],
+    "approach_insights": [
+      "Insight 1 about approaching investors",
+      "Insight 2 about strategy"
+    ]
+  },
+  "suggestions_for_precision": [
+    "Suggestion 1 for better accuracy",
+    "Suggestion 2 for improvements"
+  ],
+  "summary": "Brief summary of analysis and methods used"
+}
+
+Case 2 — Insufficient Data
+{
+  "status": "insufficient_data",
+  "valuation_summary": {
+    "final_estimated_value": null,
+    "valuation_range": {
+      "low": null,
+      "high": null,
+      "mid": null
+    },
+    "methodology_breakdown": {
+      "vc_ev": null,
+      "scorecard_ev": null,
+      "berkus_ev": null,
+      "dcf_ev": null,
+      "comps_ev": null
+    }
+  },
+  "investment_strategy": {
+    "ideal_investment_amount": null,
+    "suggested_investor_equity": null,
+    "founder_equity_retention_post_round": null
+  },
+  "competitive_landscape": {
+    "competitors": [],
+    "pros_cons_vs_competitors": {
+      "pros": [],
+      "cons": [],
+      "opportunities": [],
+      "threats": []
+    }
+  },
+  "investor_discovery": {
+    "target_investors": [],
+    "regional_programs": [],
+    "approach_insights": []
+  },
+  "suggestions_for_precision": [
+    "Specify sector to load growth benchmarks",
+    "Provide expected revenue projections",
+    "Include funding target information",
+    "Add market size estimates"
+  ],
+  "summary": "Insufficient data for reliable valuation. More information needed."
+}
+"""
+
+    def _parse_startup_response(self, response_text):
+        """
+        Parse startup analysis response from Gemini
+        """
+        try:
+            response_text = response_text.strip()
+            
+            # Try to extract JSON content from the response
+            json_text = self._extract_json_content(response_text)
+            
+            if not json_text:
+                # Try to find JSON manually if extraction fails
+                start_brace = response_text.find("{")
+                end_brace = response_text.rfind("}")
+                if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+                    json_text = response_text[start_brace : end_brace + 1]
+            
+            if not json_text:
+                raise ValueError("No JSON content found in response")
+            
+            # Fix common JSON issues
+            json_text = self._fix_common_json_issues(json_text)
+            
+            # Parse the JSON
+            parsed_data = json.loads(json_text)
+            return parsed_data
+            
+        except json.JSONDecodeError as e:
+            # Return fallback structure for insufficient data case
+            return {
+                "status": "insufficient_data",
+                "valuation_summary": {
+                    "final_estimated_value": None,
+                    "valuation_range": {
+                        "low": None,
+                        "high": None,
+                        "mid": None
+                    },
+                    "methodology_breakdown": {
+                        "vc_ev": None,
+                        "scorecard_ev": None,
+                        "berkus_ev": None,
+                        "dcf_ev": None,
+                        "comps_ev": None
+                    }
+                },
+                "investment_strategy": {
+                    "ideal_investment_amount": None,
+                    "suggested_investor_equity": None,
+                    "founder_equity_retention_post_round": None
+                },
+                "competitive_landscape": {
+                    "competitors": [],
+                    "pros_cons_vs_competitors": {
+                        "pros": [],
+                        "cons": [],
+                        "opportunities": [],
+                        "threats": []
+                    }
+                },
+                "investor_discovery": {
+                    "target_investors": [],
+                    "regional_programs": [],
+                    "approach_insights": []
+                },
+                "suggestions_for_precision": [
+                    "Please provide more detailed startup information",
+                    "Include sector/industry details",
+                    "Specify target market and revenue projections",
+                    "Add funding requirements and stage information"
+                ],
+                "summary": f"Unable to parse response. JSON error: {str(e)}",
+                "error": str(e)
+            }
+            
+        except Exception as e:
+            # Return generic error fallback
+            return {
+                "status": "insufficient_data",
+                "valuation_summary": {
+                    "final_estimated_value": None,
+                    "valuation_range": {
+                        "low": None,
+                        "high": None,
+                        "mid": None
+                    },
+                    "methodology_breakdown": {
+                        "vc_ev": None,
+                        "scorecard_ev": None,
+                        "berkus_ev": None,
+                        "dcf_ev": None,
+                        "comps_ev": None
+                    }
+                },
+                "investment_strategy": {
+                    "ideal_investment_amount": None,
+                    "suggested_investor_equity": None,
+                    "founder_equity_retention_post_round": None
+                },
+                "competitive_landscape": {
+                    "competitors": [],
+                    "pros_cons_vs_competitors": {
+                        "pros": [],
+                        "cons": [],
+                        "opportunities": [],
+                        "threats": []
+                    }
+                },
+                "investor_discovery": {
+                    "target_investors": [],
+                    "regional_programs": [],
+                    "approach_insights": []
+                },
+                "suggestions_for_precision": [
+                    "System error occurred during analysis",
+                    "Please try again with more detailed information",
+                    "Include specific business model and market details"
+                ],
+                "summary": f"Analysis error: {str(e)}",
+                "error": f"Unexpected error: {str(e)}"
+            }
