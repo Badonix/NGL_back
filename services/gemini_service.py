@@ -162,6 +162,186 @@ class GeminiFinancialExtractor:
         except Exception as e:
             return {"success": False, "error": f"Gemini API error: {str(e)}"}
 
+    def aggregate_investment_responses(self, model_responses, financial_data, valuation_data, investment_data):
+        """
+        Use Gemini to aggregate the responses from 5 OpenRouter models into a final investment decision
+        """
+        try:
+            # Filter successful responses
+            successful_responses = [r for r in model_responses if r["success"]]
+
+            if not successful_responses:
+                return {
+                    "verdict": "insufficient_data",
+                    "confidence": 0,
+                    "error": "No models provided valid responses",
+                }
+
+            # Build enhanced aggregation prompt for Gemini
+            aggregation_prompt = f"""
+You are the final investment decision aggregator using Google Gemini. You have received responses from {len(successful_responses)} AI models (from OpenRouter), each with different weights/coefficients. Your task is to produce a final normalized investment decision that takes these coefficients into account and provides realistic, well-reasoned output.
+
+ORIGINAL DATA SOURCES:
+
+1) FINANCE_JSON:
+{json.dumps(financial_data, indent=2)}
+
+2) VALUATION_JSON:
+{json.dumps(valuation_data, indent=2)}
+
+3) NEW_INFO_JSON:
+{json.dumps(investment_data, indent=2)}
+
+MODEL RESPONSES WITH THEIR COEFFICIENTS:
+"""
+
+            for response in successful_responses:
+                aggregation_prompt += f"""
+MODEL: {response['model']} (COEFFICIENT: {response['weight']})
+RESPONSE: {json.dumps(response['response'], indent=2)}
+
+"""
+
+            aggregation_prompt += """
+NOTE: The user has explicitly initiated a full evaluation. Even if data is incomplete, you MUST produce a final verdict and full output package. Do not return an "insufficient_data" stop. Instead, when any data is incomplete, proceed with best-effort estimations, set lower confidence, and include clear follow_up_questions and provenance explaining what was estimated and why.
+
+TASK — produce a final investment decision package by intelligently aggregating the model responses.
+
+ALL OF THE DATA IS PROVIDED IN GEL CURRENCY
+
+If there was no equity specified, come up with a reasonable equity percentage based on the stage of the company and the typical equity percentage for that stage.
+
+If there was no valuation specified, come up with a reasonable valuation based on the stage of the company and the typical valuation for that stage.
+
+RULES (strict — follow exactly):
+
+1. **Aggregate model responses using their coefficients**: 
+   - Weight each model's numerical outputs (valuations, confidence, risk scores) by their coefficient
+   - For verdicts: prioritize higher-weighted models, but ensure logical consistency
+   - Normalize and moderate extreme values to realistic ranges
+   - Provide evidence-based rationale for why these aggregated values are appropriate
+
+2. **Confidence per method (0–1)**: Derive a confidence for each method based on data quality and model agreement.
+
+3. **Risk adjustment**: Compute risk_score (0–1) as average of normalized risk inputs in NEW_INFO_JSON.risk_factors.
+
+4. **Decision rules**: Apply verdict logic based on status, data quality, risk score, and ownership thresholds.
+
+5. **Recommended offer**: 
+   - Suggest raise_amount targeting adjusted_p50
+   - Calculate equity_pct = 100 × raise_amount / (pre_money + raise_amount) - ENSURE this is a realistic percentage (typically 10-25% for institutional rounds)
+   - If calculated equity is unrealistic (< 1% or > 50%), adjust raise_amount to target 15-20% equity range
+
+6. **Provenance & transparency**: Include detailed evidence and reasoning for all major decisions.
+
+7. **Final Summary**: Provide clear rationale explaining why this aggregated decision is more reliable than individual model outputs, with specific evidence from the data and model consensus/disagreements.
+
+8. **Investment Analysis**: Provide detailed reasoning for the investment decision:
+   - why_invest: Compelling reasons why this is a good investment opportunity (be specific about business model, traction, team)
+   - growth_potential: Detailed analysis of growth prospects with specific metrics and market drivers
+   - market_opportunity: Size of addressable market and company's positioning
+   - competitive_advantages: What makes this company unique and defensible
+   - key_risks: Specific risks that could impact returns (market, execution, financial, competitive)
+   - mitigation_strategies: How identified risks can be managed or reduced
+   - expected_returns: Realistic return expectations based on valuation and growth trajectory
+   - timeline_expectations: Expected timeline for value creation and potential exit opportunities
+
+OUTPUT_SCHEMA (return this JSON with these keys and types):
+
+{
+  "verdict": "invest" | "consider_with_conditions" | "dont_invest" | "insufficient_data",
+  "confidence": number 0-100,
+  "valuation": {
+    "raw": { "p25": number | null, "p50": number | null, "p75": number | null },
+    "adjusted": { "p25": number | null, "p50": number | null, "p75": number | null },
+    "method_breakdown": {
+      "dcf": {"p25":number,"p50":number,"p75":number,"confidence":number} | null,
+      "multiples": {"p25":number,"p50":number,"p75":number,"confidence":number} | null,
+      "precedent": {"p25":number,"p50":number,"p75":number,"confidence":number} | null,
+      "rule_of_thumb": {"p25":number,"p50":number,"p75":number,"confidence":number} | null
+    }
+  },
+  "recommended_offer": { "raise_amount": number | null, "equity_pct": number | null, "terms": string | null },
+  "cap_table_impact": { "price_per_share_pre": number | null, "new_shares": number | null, "total_shares_after": number | null, "investor_pct_after": number | null },
+  "offer_assessment": { 
+    "status": "attractive" | "fair" | "expensive" | "inconsistent" | "insufficient_data", 
+    "details": string,
+    "implied_pre_money_from_offer": number | null,
+    "implied_percent_from_raise": number | null,
+    "implied_amount_from_equity_pct": number | null,
+    "consistency_check": "consistent" | "inconsistent" | "insufficient_data"
+  },
+  "risk_score": number 0-1,
+  "top_evidence": [ {"title": string, "value": number | string, "source": string, "why": string} ],
+  "rationale": [ string ],
+  "follow_up_questions": [ string ],
+  "provenance": { "internal_docs": [ string ], "external_apis": [ string ], "timestamp": string },
+  "simple_summary": {
+    "headline": string,
+    "why": string,
+    "risk_and_consistency": string,
+    "next_steps": string
+  },
+  "aggregation_summary": {
+    "models_consensus": string,
+    "key_disagreements": string,
+    "final_reasoning": string,
+    "confidence_basis": string
+  },
+  "investment_analysis": {
+    "why_invest": string,
+    "growth_potential": string,
+    "market_opportunity": string,
+    "competitive_advantages": string,
+    "key_risks": string,
+    "mitigation_strategies": string,
+    "expected_returns": string,
+    "timeline_expectations": string
+  }
+}
+
+ADDITIONAL INSTRUCTIONS:
+- Perform arithmetic carefully and return currency numbers rounded to 2 decimal places and percentages to up to 4 decimal places.
+- If you must estimate, provide the estimate with appropriate confidence and state the reason in rationale.
+- Include aggregation_summary explaining how model responses were combined and why this final decision is superior.
+- Ensure all numeric fields are present (use null where not computable).
+- Timestamp format must be ISO 8601 UTC.
+- Return ONLY the JSON structure. No explanations or markdown outside the JSON.
+
+Now analyze the provided data and model responses, apply the coefficients appropriately, and RETURN the single JSON result that follows OUTPUT_SCHEMA.
+"""
+
+            # Generate response using Gemini
+            response = self.model.generate_content(
+                aggregation_prompt, generation_config=self.generation_config
+            )
+
+            response_text = self._extract_response_text(response)
+            if not response_text:
+                raise ValueError("No text content in Gemini response")
+
+            # Parse the aggregated response
+            aggregated_result = self._parse_investment_response(response_text)
+            
+            print(f"DEBUG: Gemini aggregation completed successfully")
+            print(f"DEBUG: Final verdict: {aggregated_result.get('verdict', 'unknown')}")
+            print(f"DEBUG: Final confidence: {aggregated_result.get('confidence', 0)}")
+            
+            return aggregated_result
+
+        except Exception as e:
+            print(f"ERROR: Gemini aggregation failed: {str(e)}")
+            # Fallback: return the highest weighted successful response
+            if successful_responses:
+                best_response = max(successful_responses, key=lambda x: x["weight"])
+                return best_response["response"]
+            else:
+                return {
+                    "verdict": "insufficient_data",
+                    "confidence": 0,
+                    "error": f"Gemini aggregation error: {str(e)}",
+                }
+
     def _parse_response(self, response_text):
         try:
             if not response_text or response_text.strip() == "":

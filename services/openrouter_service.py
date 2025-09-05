@@ -3,6 +3,7 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import Config
+from .gemini_service import GeminiFinancialExtractor
 
 
 class OpenRouterService:
@@ -24,6 +25,14 @@ class OpenRouterService:
         # Configuration for parallel processing
         self.max_concurrent_workers = max_concurrent_workers
         self.model_timeout = 30  # seconds per model
+
+        # Initialize Gemini service for final aggregation
+        try:
+            self.gemini_service = GeminiFinancialExtractor()
+            print("DEBUG: Gemini service initialized for aggregation")
+        except Exception as e:
+            print(f"WARNING: Gemini not available for aggregation: {e}")
+            self.gemini_service = None
 
     def check_investment_sufficiency(
         self, valuation_data, financial_data, investment_data
@@ -433,7 +442,7 @@ Be specific and actionable in your assessment. Focus on what investment informat
     def _aggregate_model_responses(
         self, model_responses, financial_data, valuation_data, investment_data
     ):
-        """Send all model responses to a final aggregation model with enhanced normalization"""
+        """Use Gemini to aggregate all model responses into a final investment decision"""
 
         # Filter successful responses
         successful_responses = [r for r in model_responses if r["success"]]
@@ -445,8 +454,24 @@ Be specific and actionable in your assessment. Focus on what investment informat
                 "error": "No models provided valid responses",
             }
 
-        # Build enhanced aggregation prompt
-        aggregation_prompt = f"""
+        # Use Gemini for final aggregation if available
+        if self.gemini_service:
+            try:
+                print(f"DEBUG: Using Gemini for final aggregation of {len(successful_responses)} model responses")
+                final_response = self.gemini_service.aggregate_investment_responses(
+                    model_responses, financial_data, valuation_data, investment_data
+                )
+                print(f"DEBUG: Gemini aggregation successful")
+                return final_response
+            except Exception as e:
+                print(f"WARNING: Gemini aggregation failed: {e}, falling back to LLaMA")
+                # Continue to fallback below
+
+        # Fallback: Use LLaMA for aggregation (original behavior)
+        print(f"DEBUG: Using LLaMA fallback for aggregation")
+        try:
+            # Build enhanced aggregation prompt for LLaMA
+            aggregation_prompt = f"""
 You are the final investment decision aggregator. You have received responses from {len(successful_responses)} AI models, each with different weights/coefficients. Your task is to produce a final normalized investment decision that takes these coefficients into account and provides realistic, well-reasoned output.
 
 ORIGINAL DATA SOURCES:
@@ -463,140 +488,45 @@ ORIGINAL DATA SOURCES:
 MODEL RESPONSES WITH THEIR COEFFICIENTS:
 """
 
-        for response in successful_responses:
-            aggregation_prompt += f"""
+            for response in successful_responses:
+                aggregation_prompt += f"""
 MODEL: {response['model']} (COEFFICIENT: {response['weight']})
 RESPONSE: {json.dumps(response['response'], indent=2)}
 
 """
 
-        aggregation_prompt += """
-NOTE: The user has explicitly initiated a full evaluation (e.g., pressed the evaluation button). Even if data is incomplete, you MUST produce a final verdict and full output package. Do not return an "insufficient_data" stop. Instead, when any data is incomplete, proceed with best-effort estimations, set lower confidence, and include clear follow_up_questions and provenance explaining what was estimated and why.
+            aggregation_prompt += """
+NOTE: The user has explicitly initiated a full evaluation. Even if data is incomplete, you MUST produce a final verdict and full output package. Do not return an "insufficient_data" stop. Instead, when any data is incomplete, proceed with best-effort estimations, set lower confidence, and include clear follow_up_questions and provenance explaining what was estimated and why.
 
-TASK — produce a final investment decision package.
+TASK — produce a final investment decision package by intelligently aggregating the model responses.
 
-RULES (strict — follow exactly):
-
-0. **Return only JSON** that exactly matches the OUTPUT_SCHEMA below. No explanation, no commentary, no markdown — only the JSON object.
-
-1. **Do not abort for missing inputs.** If critical data to compute valuations is missing (no pre_money in VALUATION_JSON AND no reliable comps AND no projections in NEW_INFO_JSON), proceed with reasonable default assumptions and heuristics to compute valuations. Examples of reasonable defaults: stage-based default WACC (Seed=0.30, SeriesA=0.20, Later=0.10), terminal growth 2%, ARR multiples per sector heuristics if ARR present, median comps where available. Any estimated or defaulted values must be explicitly annotated in provenance and the overall `confidence` must reflect the weaker data quality.
-
-2. **Aggregate model responses using their coefficients**: 
-   - Weight each model's numerical outputs (valuations, confidence, risk scores) by their coefficient
-   - For verdicts: prioritize higher-weighted models, but ensure logical consistency
-   - Normalize and moderate extreme values to realistic ranges
-   - Provide evidence-based rationale for why these aggregated values are appropriate
-
-3. **Methods to use** (compute only if inputs exist or can be reasonably estimated):
-   - **DCF**: if `projections` exist OR can be reasonably estimated from historicals/ARR. Compute unlevered FCF per year = EBITDA - Taxes - CapEx - ΔWorkingCapital. Use `dcf.wacc` if provided, otherwise default by stage as above. Terminal growth = `dcf.terminal_growth` or default 0.02. Run three scenarios: downside (growth -30% and margin -20% from base), base (user projections or best-estimate), upside (growth +30% and margin +20%). Output P25=P(downside), P50=P(base), P75=P(upside).
-   - **Multiples (comps)**: if `comps[]` present. Remove top and bottom 5% outliers, compute median EV/Revenue and EV/EBITDA (if available). Apply medians to subject company revenue/EBITDA to produce P25/P50/P75 (use IQR of multiples to derive P25/P75). If no comps, but sector typical multiples exist in NEW_INFO_JSON or defaults, use them and mark provenance.
-   - **Precedent transactions**: similar to multiples if present.
-   - **Rule-of-thumb**: if arr_multiple_band provided or ARR present, compute P25/P50/P75 from band × ARR or use sector heuristics.
-   - **Prior valuations**: include last known pre_money(s) with age-based decay weight (older = lower weight).
-
-4. **Confidence per method (0–1)**: Derive a confidence for each method based on data quality and model agreement.
-
-5. **Combine methods into raw valuation percentiles**: Use `preferences.method_weights` from NEW_INFO_JSON if present, else defaults: { dcf:0.4, multiples:0.3, precedent:0.2, rule_of_thumb:0.1 }.
-
-6. **Risk adjustment**: Compute `risk_score` (0–1) as average of normalized risk inputs in NEW_INFO_JSON.risk_factors. Apply risk_multiplier = 1 - (risk_score × preferences.risk_scale).
-
-7. **Offer assessment**: Compute implied valuations and determine if offer is "attractive", "fair", "expensive", or "inconsistent".
-
-8. **Decision rules**: Apply verdict logic based on status, data quality, risk score, and ownership thresholds.
-
-9. **Recommended offer**: 
-   - Suggest raise_amount targeting adjusted_p50
-   - Calculate equity_pct = 100 × raise_amount / (pre_money + raise_amount) - ENSURE this is a realistic percentage (typically 10-25% for institutional rounds)
-   - If calculated equity is unrealistic (< 1% or > 50%), adjust raise_amount to target 15-20% equity range
-
-10. **Cap table updates**: Compute share price and ownership impact if data available.
-
-11. **Provenance & transparency**: Include detailed evidence and reasoning for all major decisions.
-
-12. **Final Summary**: Provide clear rationale explaining why this aggregated decision is more reliable than individual model outputs, with specific evidence from the data and model consensus/disagreements.
-
-13. **Investment Analysis**: Provide detailed reasoning for the investment decision:
-   - why_invest: Compelling reasons why this is a good investment opportunity (be specific about business model, traction, team)
-   - growth_potential: Detailed analysis of growth prospects with specific metrics and market drivers
-   - market_opportunity: Size of addressable market and company's positioning
-   - competitive_advantages: What makes this company unique and defensible
-   - key_risks: Specific risks that could impact returns (market, execution, financial, competitive)
-   - mitigation_strategies: How identified risks can be managed or reduced
-   - expected_returns: Realistic return expectations based on valuation and growth trajectory
-   - timeline_expectations: Expected timeline for value creation and potential exit opportunities
-
-OUTPUT_SCHEMA (return this JSON with these keys and types):
+Return ONLY the JSON structure that follows the OUTPUT_SCHEMA. No explanations or markdown outside the JSON.
 
 {
   "verdict": "invest" | "consider_with_conditions" | "dont_invest" | "insufficient_data",
   "confidence": number 0-100,
   "valuation": {
     "raw": { "p25": number | null, "p50": number | null, "p75": number | null },
-    "adjusted": { "p25": number | null, "p50": number | null, "p75": number | null },
-    "method_breakdown": {
-      "dcf": {"p25":number,"p50":number,"p75":number,"confidence":number} | null,
-      "multiples": {"p25":number,"p50":number,"p75":number,"confidence":number} | null,
-      "precedent": {"p25":number,"p50":number,"p75":number,"confidence":number} | null,
-      "rule_of_thumb": {"p25":number,"p50":number,"p75":number,"confidence":number} | null
-    }
-  },
-  "recommended_offer": { "raise_amount": number | null, "equity_pct": number | null, "terms": string | null },
-  "cap_table_impact": { "price_per_share_pre": number | null, "new_shares": number | null, "total_shares_after": number | null, "investor_pct_after": number | null },
-  "offer_assessment": { 
-    "status": "attractive" | "fair" | "expensive" | "inconsistent" | "insufficient_data", 
-    "details": string,
-    "implied_pre_money_from_offer": number | null,
-    "implied_percent_from_raise": number | null,
-    "implied_amount_from_equity_pct": number | null,
-    "consistency_check": "consistent" | "inconsistent" | "insufficient_data"
-  },
-  "risk_score": number 0-1,
-  "top_evidence": [ {"title": string, "value": number | string, "source": string, "why": string} ],
-  "rationale": [ string ],
-  "follow_up_questions": [ string ],
-  "provenance": { "internal_docs": [ string ], "external_apis": [ string ], "timestamp": string },
-  "simple_summary": {
-    "headline": string,
-    "why": string,
-    "risk_and_consistency": string,
-    "next_steps": string
+    "adjusted": { "p25": number | null, "p50": number | null, "p75": number | null }
   },
   "aggregation_summary": {
     "models_consensus": string,
     "key_disagreements": string,
     "final_reasoning": string,
     "confidence_basis": string
-  },
-  "investment_analysis": {
-    "why_invest": string,
-    "growth_potential": string,
-    "market_opportunity": string,
-    "competitive_advantages": string,
-    "key_risks": string,
-    "mitigation_strategies": string,
-    "expected_returns": string,
-    "timeline_expectations": string
   }
 }
 
-ADDITIONAL INSTRUCTIONS:
-- Perform arithmetic carefully and return currency numbers rounded to 2 decimal places and percentages to up to 4 decimal places.
-- If you must estimate, provide the estimate with appropriate confidence and state the reason in `rationale`.
-- Include aggregation_summary explaining how model responses were combined and why this final decision is superior.
-- Ensure all numeric fields are present (use null where not computable).
-- Timestamp format must be ISO 8601 UTC.
-
-Now analyze the provided data and model responses, apply the coefficients appropriately, and RETURN the single JSON result that follows OUTPUT_SCHEMA.
+Now analyze the provided data and model responses, apply the coefficients appropriately, and RETURN the single JSON result.
 """
 
-        # Send to the strongest model (llama-4-maverick) for final decision
-        try:
             final_response = self._query_model(
                 "meta-llama/llama-4-maverick", aggregation_prompt
             )
             return final_response
         except Exception as e:
-            # Fallback: return the highest weighted successful response
+            print(f"WARNING: LLaMA aggregation also failed: {e}")
+            # Final fallback: return the highest weighted successful response
             best_response = max(successful_responses, key=lambda x: x["weight"])
             return best_response["response"]
 
