@@ -2480,3 +2480,399 @@ Case 2 — Insufficient Data
                 "summary": f"Analysis error: {str(e)}",
                 "error": f"Unexpected error: {str(e)}"
             }
+
+    def analyze_competitors(self, company_data):
+        """
+        Use Gemini to analyze company documents and identify competitors in the same industry
+        """
+        try:
+            competitor_prompt = self._get_competitor_analysis_prompt()
+            
+            full_prompt = competitor_prompt + f"""
+
+COMPANY_DATA:
+{company_data}
+"""
+            
+            response = self.model.generate_content(
+                full_prompt, generation_config=self.generation_config
+            )
+            response_text = self._extract_response_text(response)
+            
+            if not response_text:
+                raise ValueError("No text content in Gemini response")
+            
+            competitor_analysis = self._parse_competitor_response(response_text)
+            return {"success": True, "data": competitor_analysis}
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Competitor analysis error: {str(e)}",
+                "raw_response": None,
+            }
+
+    def _get_competitor_analysis_prompt(self):
+        """
+        Return the competitor analysis prompt for Gemini
+        """
+        return """ROLE
+You are a financial analysis orchestrator and valuation assistant.
+Your task is to:
+
+1. Extract full financials from uploaded company documents
+2. Identify company industry and size automatically
+3. Find best comparable peers at the same competitive level
+
+COMPETITOR MATCHING PRIORITY:
+1. FIRST PRIORITY: Companies in the same country and same industry
+2. SECOND PRIORITY: If the company is a top/large company in its country, then find global competitors in the same industry
+3. SAME LEVEL MATCHING: Match companies of similar size/revenue level - do NOT match small local companies with multibillion-dollar corporations
+
+INSTRUCTIONS:
+- Analyze company size, revenue, and market position from the financial data
+- Identify the company's country of operation
+- Match competitors at the same competitive level (small vs small, large vs large)
+- For local/regional companies: prioritize domestic competitors
+- For major market leaders: include relevant global competitors
+- Return ONLY a JSON response with the specified format
+
+SIZE MATCHING EXAMPLES:
+- Small local restaurant → other local/regional restaurant chains, NOT McDonald's
+- Regional bank → other regional banks, NOT JPMorgan Chase
+- Large multinational tech company → other major tech companies globally
+- SME logistics company → other SME logistics companies in same region
+
+OUTPUT FORMAT:
+You must return ONLY a valid JSON object with this exact structure:
+{"competitors":["Company1", "Company2", "Company3"]}
+
+IMPORTANT:
+- Return ONLY the JSON object, no additional text
+- Use well-known, real company names at appropriate scale
+- Maximum 8 competitors
+- Ensure all company names are spelled correctly
+- Match company size and market level appropriately
+"""
+
+    def _parse_competitor_response(self, response_text):
+        """
+        Parse competitor analysis response from Gemini
+        """
+        try:
+            response_text = response_text.strip()
+            
+            # Try to extract JSON content from the response
+            json_text = self._extract_json_content(response_text)
+            
+            if not json_text:
+                # Try to find JSON manually if extraction fails
+                start_brace = response_text.find("{")
+                end_brace = response_text.rfind("}")
+                if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+                    json_text = response_text[start_brace : end_brace + 1]
+            
+            if not json_text:
+                raise ValueError("No JSON content found in response")
+            
+            # Fix common JSON issues
+            json_text = self._fix_common_json_issues(json_text)
+            
+            # Parse the JSON
+            parsed_data = json.loads(json_text)
+            
+            # Ensure we have the expected structure
+            if "competitors" not in parsed_data:
+                parsed_data = {"competitors": []}
+            
+            # Ensure competitors is a list
+            if not isinstance(parsed_data["competitors"], list):
+                parsed_data["competitors"] = []
+            
+            return parsed_data
+            
+        except json.JSONDecodeError as e:
+            # Return fallback structure for JSON parsing errors
+            return {
+                "competitors": [],
+                "error": f"JSON parsing error: {str(e)}",
+                "raw_response": response_text[:500] if response_text else "No response"
+            }
+            
+        except Exception as e:
+            # Return generic error fallback
+            return {
+                "competitors": [],
+                "error": f"Unexpected error: {str(e)}",
+                "raw_response": response_text[:500] if response_text else "No response"
+            }
+
+    def compare_companies(self, company_a_data, company_b_data):
+        """
+        Use Gemini to compare two companies based on their financial documents
+        """
+        try:
+            comparison_prompt = self._get_company_comparison_prompt()
+
+            full_prompt = comparison_prompt + f"""
+
+COMPANY A DATA:
+{company_a_data}
+
+COMPANY B DATA:
+{company_b_data}
+"""
+
+            response = self.model.generate_content(
+                full_prompt, generation_config=self.generation_config
+            )
+            response_text = self._extract_response_text(response)
+
+            if not response_text:
+                raise ValueError("No text content in Gemini response")
+
+            comparison_analysis = self._parse_comparison_response(response_text)
+            return {"success": True, "data": comparison_analysis}
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Company comparison error: {str(e)}",
+                "raw_response": None,
+            }
+
+    def _get_company_comparison_prompt(self):
+        """
+        Return the company comparison prompt for Gemini
+        """
+        return """ROLE
+You are a financial analysis expert and investment advisor specializing in comprehensive company comparisons.
+Your task is to analyze and compare two companies based on their financial documents and provide detailed insights.
+
+ANALYSIS REQUIREMENTS:
+1. Extract and compare key financial metrics from both companies
+2. Analyze business models, market positioning, and competitive advantages
+3. Compare financial performance, growth trajectories, and profitability
+4. Assess operational efficiency and market presence
+5. Evaluate investment attractiveness and risk profiles
+6. Provide actionable insights and recommendations
+
+COMPARISON AREAS:
+- Financial Performance (Revenue, Profitability, Growth)
+- Market Position (Market share, competitive advantages)
+- Operational Efficiency (Cost structure, margins, efficiency ratios)
+- Growth Potential (Market opportunities, scalability)
+- Risk Assessment (Financial stability, market risks)
+- Investment Attractiveness (Valuation, ROI potential)
+
+OUTPUT FORMAT:
+You must return ONLY a valid JSON object with this exact structure:
+
+{
+  "comparison_summary": {
+    "company_a_name": "Company A Name",
+    "company_b_name": "Company B Name",
+    "analysis_date": "2024-01-01",
+    "overall_winner": "Company A/Company B/Tie",
+    "key_differentiator": "Brief explanation of main difference"
+  },
+  "financial_comparison": {
+    "revenue": {
+      "company_a": {
+        "value": 1000000,
+        "growth_rate": 0.15,
+        "trend": "Growing/Stable/Declining"
+      },
+      "company_b": {
+        "value": 800000,
+        "growth_rate": 0.10,
+        "trend": "Growing/Stable/Declining"
+      },
+      "winner": "Company A/Company B/Tie",
+      "analysis": "Detailed comparison of revenue performance"
+    },
+    "profitability": {
+      "company_a": {
+        "net_margin": 0.12,
+        "gross_margin": 0.45,
+        "ebitda_margin": 0.20
+      },
+      "company_b": {
+        "net_margin": 0.08,
+        "gross_margin": 0.40,
+        "ebitda_margin": 0.15
+      },
+      "winner": "Company A/Company B/Tie",
+      "analysis": "Detailed comparison of profitability metrics"
+    },
+    "growth": {
+      "company_a": {
+        "revenue_growth": 0.15,
+        "profit_growth": 0.20,
+        "market_expansion": "Description"
+      },
+      "company_b": {
+        "revenue_growth": 0.10,
+        "profit_growth": 0.12,
+        "market_expansion": "Description"
+      },
+      "winner": "Company A/Company B/Tie",
+      "analysis": "Detailed comparison of growth metrics"
+    }
+  },
+  "operational_comparison": {
+    "efficiency": {
+      "company_a": {
+        "operational_efficiency": "High/Medium/Low",
+        "cost_management": "Excellent/Good/Poor",
+        "asset_utilization": "Description"
+      },
+      "company_b": {
+        "operational_efficiency": "High/Medium/Low",
+        "cost_management": "Excellent/Good/Poor",
+        "asset_utilization": "Description"
+      },
+      "winner": "Company A/Company B/Tie",
+      "analysis": "Detailed comparison of operational efficiency"
+    },
+    "market_position": {
+      "company_a": {
+        "market_share": "Description",
+        "competitive_advantages": ["Advantage 1", "Advantage 2"],
+        "brand_strength": "Strong/Medium/Weak"
+      },
+      "company_b": {
+        "market_share": "Description",
+        "competitive_advantages": ["Advantage 1", "Advantage 2"],
+        "brand_strength": "Strong/Medium/Weak"
+      },
+      "winner": "Company A/Company B/Tie",
+      "analysis": "Detailed comparison of market positioning"
+    }
+  },
+  "investment_analysis": {
+    "valuation": {
+      "company_a": {
+        "estimated_value": 5000000,
+        "valuation_multiple": 5.0,
+        "growth_premium": "Description"
+      },
+      "company_b": {
+        "estimated_value": 4000000,
+        "valuation_multiple": 4.5,
+        "growth_premium": "Description"
+      },
+      "winner": "Company A/Company B/Tie",
+      "analysis": "Detailed valuation comparison"
+    },
+    "risk_assessment": {
+      "company_a": {
+        "financial_risk": "Low/Medium/High",
+        "market_risk": "Low/Medium/High",
+        "operational_risk": "Low/Medium/High",
+        "overall_risk_score": 3.5
+      },
+      "company_b": {
+        "financial_risk": "Low/Medium/High",
+        "market_risk": "Low/Medium/High",
+        "operational_risk": "Low/Medium/High",
+        "overall_risk_score": 4.0
+      },
+      "winner": "Company A/Company B/Tie",
+      "analysis": "Detailed risk comparison"
+    },
+    "investment_recommendation": {
+      "preferred_investment": "Company A/Company B/Both/Neither",
+      "investment_rationale": "Detailed explanation of investment recommendation",
+      "key_factors": ["Factor 1", "Factor 2", "Factor 3"],
+      "potential_returns": {
+        "company_a": "High/Medium/Low",
+        "company_b": "High/Medium/Low"
+      }
+    }
+  },
+  "strengths_weaknesses": {
+    "company_a": {
+      "strengths": ["Strength 1", "Strength 2", "Strength 3"],
+      "weaknesses": ["Weakness 1", "Weakness 2"],
+      "opportunities": ["Opportunity 1", "Opportunity 2"],
+      "threats": ["Threat 1", "Threat 2"]
+    },
+    "company_b": {
+      "strengths": ["Strength 1", "Strength 2", "Strength 3"],
+      "weaknesses": ["Weakness 1", "Weakness 2"],
+      "opportunities": ["Opportunity 1", "Opportunity 2"],
+      "threats": ["Threat 1", "Threat 2"]
+    }
+  },
+  "recommendations": {
+    "for_company_a": ["Recommendation 1", "Recommendation 2"],
+    "for_company_b": ["Recommendation 1", "Recommendation 2"],
+    "for_investors": ["Investment insight 1", "Investment insight 2"],
+    "strategic_insights": ["Strategic insight 1", "Strategic insight 2"]
+  }
+}
+
+INSTRUCTIONS:
+- Analyze both companies thoroughly based on the provided financial documents
+- Extract actual financial figures where available
+- Provide balanced, objective analysis
+- Return ONLY the JSON object, no additional text
+- Ensure all numerical values are realistic and based on document data
+- If specific data is not available, provide reasonable estimates or mark as "Data not available"
+"""
+
+    def _parse_comparison_response(self, response_text):
+        """
+        Parse company comparison response from Gemini
+        """
+        try:
+            response_text = response_text.strip()
+
+            # Try to extract JSON content from the response
+            json_text = self._extract_json_content(response_text)
+
+            if not json_text:
+                # Try to find JSON manually if extraction fails
+                start_brace = response_text.find("{")
+                end_brace = response_text.rfind("}")
+                if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+                    json_text = response_text[start_brace : end_brace + 1]
+
+            if not json_text:
+                raise ValueError("No JSON content found in response")
+
+            # Fix common JSON issues
+            json_text = self._fix_common_json_issues(json_text)
+
+            # Parse the JSON
+            parsed_data = json.loads(json_text)
+            return parsed_data
+
+        except json.JSONDecodeError as e:
+            # Return fallback structure for JSON parsing errors
+            return {
+                "comparison_summary": {
+                    "company_a_name": "Company A",
+                    "company_b_name": "Company B",
+                    "analysis_date": datetime.now().strftime("%Y-%m-%d"),
+                    "overall_winner": "Tie",
+                    "key_differentiator": "Analysis failed - insufficient data"
+                },
+                "error": f"JSON parsing error: {str(e)}",
+                "raw_response": response_text[:500] if response_text else "No response"
+            }
+
+        except Exception as e:
+            # Return generic error fallback
+            return {
+                "comparison_summary": {
+                    "company_a_name": "Company A",
+                    "company_b_name": "Company B",
+                    "analysis_date": datetime.now().strftime("%Y-%m-%d"),
+                    "overall_winner": "Tie",
+                    "key_differentiator": "Analysis error occurred"
+                },
+                "error": f"Unexpected error: {str(e)}",
+                "raw_response": response_text[:500] if response_text else "No response"
+            }

@@ -161,6 +161,40 @@ class ResponseFormatter:
         return jsonify(response_data), 200
 
     @staticmethod
+    def format_competitor_response(competitor_result):
+        if competitor_result.get("success"):
+            response_data = {
+                "success": True,
+                "message": "Competitor analysis completed",
+                "data": competitor_result.get("data", {}),
+            }
+        else:
+            response_data = {
+                "success": False,
+                "message": "Competitor analysis failed",
+                "error": competitor_result.get("error", "Unknown error occurred"),
+            }
+
+        return jsonify(response_data), 200
+
+    @staticmethod
+    def format_comparison_response(comparison_result):
+        if comparison_result.get("success"):
+            response_data = {
+                "success": True,
+                "message": "Company comparison completed",
+                "data": comparison_result.get("data", {}),
+            }
+        else:
+            response_data = {
+                "success": False,
+                "message": "Company comparison failed",
+                "error": comparison_result.get("error", "Unknown error occurred"),
+            }
+
+        return jsonify(response_data), 200
+
+    @staticmethod
     def _format_pdf_info(pdf_result):
         if not pdf_result:
             return {"available": False, "error": "No PDF generation attempted"}
