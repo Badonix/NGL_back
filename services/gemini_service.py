@@ -2646,24 +2646,83 @@ COMPANY B DATA:
         Return the company comparison prompt for Gemini
         """
         return """ROLE
-You are a financial analysis expert and investment advisor specializing in comprehensive company comparisons.
-Your task is to analyze and compare two companies based on their financial documents and provide detailed insights.
+You are a senior financial analysis expert and investment advisor specializing in comprehensive company comparisons with advanced valuation capabilities.
+Your task is to analyze and compare two companies based on their financial documents and provide detailed insights including precise valuations.
 
-ANALYSIS REQUIREMENTS:
+CRITICAL FIRST STEP - INDUSTRY VALIDATION:
+Before performing any comparison, you MUST:
+1. Identify the primary industry/sector of each company from their business description and financial data
+2. Determine if they operate in the same or closely related industries
+3. If companies are from significantly different industries (e.g., healthcare vs. retail, technology vs. manufacturing, pharmaceutical vs. construction), 
+   set "comparison_valid" to false and explain why meaningful comparison is not possible
+4. Only proceed with detailed comparison if industries are compatible for meaningful analysis
+
+ANALYSIS REQUIREMENTS (only if comparison_valid = true):
 1. Extract and compare key financial metrics from both companies
-2. Analyze business models, market positioning, and competitive advantages
-3. Compare financial performance, growth trajectories, and profitability
-4. Assess operational efficiency and market presence
-5. Evaluate investment attractiveness and risk profiles
-6. Provide actionable insights and recommendations
+2. Perform comprehensive DCF-based valuation analysis for each company
+3. Analyze business models, market positioning, and competitive advantages
+4. Compare financial performance, growth trajectories, and profitability
+5. Assess operational efficiency and market presence
+6. Evaluate detailed risk profiles and financial stability
+7. Provide investment attractiveness analysis with valuation multiples
+8. Generate actionable insights and strategic recommendations
+
+VALUATION METHODOLOGY:
+Apply this comprehensive valuation approach for BOTH companies:
+
+GLOBAL RULES
+- Deterministic & auditable: Same input ⇒ same output. Do not randomize.
+- No external data fetches or browsing. Use only what is in INPUT and CONSTANTS. If something is missing, apply the “Assumptions & Guards” exactly as written.
+- Units & scale: Inputs are GEL in thousands. Before any calc, create two internal scenarios:
+  • Scenario A (Thousands-as-stated): convert all monetary inputs to absolute GEL by ×1,000 and run the full model.  
+  • Scenario B (Already-absolute safety check): run the full model without scaling (×1).  
+  Choose the scenario whose implied EV/EBITDA (from the DCF EV) is within ±20% of the sector EV/EBITDA multiple in CONSTANTS. If both qualify, pick Scenario A. If only one qualifies, pick that one. If neither qualifies, pick the one closer to the sector multiple. All reported outputs must be from the chosen scenario and be in absolute GEL.
+- Signs & conventions: Expenses/Capex/interest paid may be negative in INPUT; treat magnitudes correctly (Capex used in calcs is |Capex|).
+- Rounding: Keep full precision internally. Output monetary values as integers (no separators); rates as decimals to 4 places where relevant (internally only—final JSON only carries values requested).
+- Exclusions: Exclude non-operating items (interest, FX gains/losses) from operating metrics and NOPAT unless specifically called for (e.g., interest for Kd).
+- Sanity flags: Apply sanity checks and guardrails; do not add extra fields to output—fold brief notes into methodology where needed.
+
+**CALCULATE VALUATION FOR BOTH COMPANIES, THE VALUATION SHOULD NOT BE RANDOMIZED, MULTIPLE GENERATION SHOULD ALWAYS RETURN SAME RESULT AND MUST BE REALISTIC**
+
+**RISK & STABILITY ANALYSIS:**
+Provide comprehensive risk assessment covering:
+
+**Financial Stability Risks:**
+- Debt-to-equity ratios and leverage analysis
+- Interest coverage and debt service capacity
+- Working capital management efficiency
+- Cash flow volatility and predictability
+- Liquidity position and cash conversion cycle
+
+**Market & Operational Risks:**
+- Market concentration and customer dependency
+- Competitive position and market share trends
+- Regulatory and compliance risks
+- Operational efficiency and cost structure
+- Management quality and corporate governance
+
+**Investment-Specific Risks:**
+- Valuation sensitivity to key assumptions
+- Sector-specific risks and cyclicality
+- Currency and geographic exposure
+- Technology and innovation risks
+- ESG (Environmental, Social, Governance) factors
+
+**Stability Indicators:**
+- Revenue predictability and recurring income
+- Margin stability across business cycles
+- Capital allocation efficiency
+- Dividend sustainability (if applicable)
+- Balance sheet strength and financial flexibility
 
 COMPARISON AREAS:
-- Financial Performance (Revenue, Profitability, Growth)
-- Market Position (Market share, competitive advantages)
+- Financial Performance (Revenue, Profitability, Growth with 5-year projections)
+- Comprehensive Valuation (DCF, Multiples, Asset-based approaches)
+- Market Position (Market share, competitive advantages, moats)
 - Operational Efficiency (Cost structure, margins, efficiency ratios)
-- Growth Potential (Market opportunities, scalability)
-- Risk Assessment (Financial stability, market risks)
-- Investment Attractiveness (Valuation, ROI potential)
+- Risk & Stability (Financial, operational, market, regulatory risks)
+- Growth Potential (Market opportunities, scalability, innovation)
+- Investment Attractiveness (Risk-adjusted returns, valuation appeal)
 
 OUTPUT FORMAT:
 You must return ONLY a valid JSON object with this exact structure:
@@ -2672,7 +2731,11 @@ You must return ONLY a valid JSON object with this exact structure:
   "comparison_summary": {
     "company_a_name": "Company A Name",
     "company_b_name": "Company B Name",
+    "company_a_industry": "Primary industry/sector of Company A",
+    "company_b_industry": "Primary industry/sector of Company B",
     "analysis_date": "2024-01-01",
+    "comparison_valid": true,
+    "industry_compatibility_reason": "Explanation of why comparison is valid/invalid",
     "overall_winner": "Company A/Company B/Tie",
     "key_differentiator": "Brief explanation of main difference"
   },
@@ -2751,43 +2814,153 @@ You must return ONLY a valid JSON object with this exact structure:
     }
   },
   "investment_analysis": {
-    "valuation": {
+    "comprehensive_valuation": {
       "company_a": {
-        "estimated_value": 5000000,
-        "valuation_multiple": 5.0,
-        "growth_premium": "Description"
+        "dcf_valuation": {
+          "enterprise_value": 5000000,
+          "equity_value": 4500000,
+          "wacc": 0.12,
+          "terminal_growth_rate": 0.035,
+          "revenue_projections": {
+            "year_1": 1200000,
+            "year_2": 1350000,
+            "year_3": 1500000,
+            "year_4": 1650000,
+            "year_5": 1800000
+          }
+        },
+        "multiples_valuation": {
+          "ev_ebitda_multiple": 6.5,
+          "ev_sales_multiple": 1.2,
+          "p_e_multiple": 15.0,
+          "comparable_ev": 4800000
+        },
+        "blended_valuation": {
+          "final_enterprise_value": 4900000,
+          "valuation_range": {
+            "low": 4200000,
+            "high": 5600000
+          },
+          "methodology_weights": {
+            "dcf": 0.60,
+            "multiples": 0.25,
+            "asset_based": 0.15
+          }
+        }
       },
       "company_b": {
-        "estimated_value": 4000000,
-        "valuation_multiple": 4.5,
-        "growth_premium": "Description"
+        "dcf_valuation": {
+          "enterprise_value": 4000000,
+          "equity_value": 3600000,
+          "wacc": 0.14,
+          "terminal_growth_rate": 0.035,
+          "revenue_projections": {
+            "year_1": 1000000,
+            "year_2": 1100000,
+            "year_3": 1200000,
+            "year_4": 1300000,
+            "year_5": 1400000
+          }
+        },
+        "multiples_valuation": {
+          "ev_ebitda_multiple": 6.0,
+          "ev_sales_multiple": 1.0,
+          "p_e_multiple": 12.0,
+          "comparable_ev": 3800000
+        },
+        "blended_valuation": {
+          "final_enterprise_value": 3900000,
+          "valuation_range": {
+            "low": 3400000,
+            "high": 4400000
+          },
+          "methodology_weights": {
+            "dcf": 0.60,
+            "multiples": 0.25,
+            "asset_based": 0.15
+          }
+        }
       },
       "winner": "Company A/Company B/Tie",
-      "analysis": "Detailed valuation comparison"
+      "analysis": "Detailed valuation comparison with DCF and multiples analysis"
     },
     "risk_assessment": {
       "company_a": {
-        "financial_risk": "Low/Medium/High",
-        "market_risk": "Low/Medium/High",
-        "operational_risk": "Low/Medium/High",
-        "overall_risk_score": 3.5
+        "financial_stability": {
+          "debt_to_equity": 0.25,
+          "interest_coverage": 8.5,
+          "current_ratio": 2.1,
+          "cash_conversion_cycle": 45,
+          "financial_risk_score": 2.0,
+          "stability_rating": "High"
+        },
+        "market_operational_risks": {
+          "market_concentration": "Low",
+          "competitive_position": "Strong",
+          "regulatory_risk": "Medium",
+          "operational_efficiency": "High",
+          "market_risk_score": 2.5
+        },
+        "investment_risks": {
+          "valuation_sensitivity": "Medium",
+          "sector_cyclicality": "Low",
+          "currency_exposure": "Low",
+          "innovation_risk": "Medium",
+          "esg_score": "Good",
+          "investment_risk_score": 2.0
+        },
+        "overall_risk_score": 2.2,
+        "risk_rating": "Low-Medium"
       },
       "company_b": {
-        "financial_risk": "Low/Medium/High",
-        "market_risk": "Low/Medium/High",
-        "operational_risk": "Low/Medium/High",
-        "overall_risk_score": 4.0
+        "financial_stability": {
+          "debt_to_equity": 0.45,
+          "interest_coverage": 4.2,
+          "current_ratio": 1.6,
+          "cash_conversion_cycle": 65,
+          "financial_risk_score": 3.5,
+          "stability_rating": "Medium"
+        },
+        "market_operational_risks": {
+          "market_concentration": "High",
+          "competitive_position": "Moderate",
+          "regulatory_risk": "High",
+          "operational_efficiency": "Medium",
+          "market_risk_score": 3.8
+        },
+        "investment_risks": {
+          "valuation_sensitivity": "High",
+          "sector_cyclicality": "Medium",
+          "currency_exposure": "Medium",
+          "innovation_risk": "High",
+          "esg_score": "Fair",
+          "investment_risk_score": 3.5
+        },
+        "overall_risk_score": 3.6,
+        "risk_rating": "Medium-High"
       },
       "winner": "Company A/Company B/Tie",
-      "analysis": "Detailed risk comparison"
+      "analysis": "Comprehensive risk analysis covering financial stability, market risks, and investment-specific factors"
     },
     "investment_recommendation": {
       "preferred_investment": "Company A/Company B/Both/Neither",
-      "investment_rationale": "Detailed explanation of investment recommendation",
+      "investment_rationale": "Detailed explanation based on valuation and risk analysis",
       "key_factors": ["Factor 1", "Factor 2", "Factor 3"],
-      "potential_returns": {
-        "company_a": "High/Medium/Low",
-        "company_b": "High/Medium/Low"
+      "risk_adjusted_returns": {
+        "company_a": {
+          "expected_return": "High/Medium/Low",
+          "risk_adjusted_score": 8.5,
+          "investment_grade": "A-/B+/B/B-/C+"
+        },
+        "company_b": {
+          "expected_return": "High/Medium/Low", 
+          "risk_adjusted_score": 6.2,
+          "investment_grade": "A-/B+/B/B-/C+"
+        }
+      },
+      "sensitivity_analysis": {
+        "key_assumptions": ["Revenue growth", "EBITDA margins", "WACC", "Terminal growth"],
+        "valuation_sensitivity": "Description of how sensitive valuations are to key assumptions"
       }
     }
   },
@@ -2814,12 +2987,22 @@ You must return ONLY a valid JSON object with this exact structure:
 }
 
 INSTRUCTIONS:
+- FIRST: Perform industry validation and set comparison_valid field accordingly
+- If comparison_valid = false: Only fill comparison_summary section and set all other fields to null or provide minimal data with "Cannot compare different industries" messages
+- If comparison_valid = true: Proceed with full analysis below
 - Analyze both companies thoroughly based on the provided financial documents
-- Extract actual financial figures where available
-- Provide balanced, objective analysis
+- Extract actual financial figures where available and perform comprehensive valuation analysis
+- Calculate DCF valuations with 5-year projections and WACC analysis
+- Apply sector-appropriate multiples and comparable analysis
+- Conduct detailed risk assessment across financial, market, and investment dimensions
+- Include sensitivity analysis for key valuation assumptions
+- Provide balanced, objective analysis with quantitative backing
 - Return ONLY the JSON object, no additional text
 - Ensure all numerical values are realistic and based on document data
-- If specific data is not available, provide reasonable estimates or mark as "Data not available"
+- Calculate specific financial ratios: debt-to-equity, interest coverage, current ratio, cash conversion cycle
+- Provide risk scores on 1-5 scale (1=low risk, 5=high risk)
+- Include investment grade ratings (A- to C+)
+- If specific data is not available, provide reasonable estimates based on industry norms
 """
 
     def _parse_comparison_response(self, response_text):
@@ -2855,7 +3038,11 @@ INSTRUCTIONS:
                 "comparison_summary": {
                     "company_a_name": "Company A",
                     "company_b_name": "Company B",
+                    "company_a_industry": "Unknown",
+                    "company_b_industry": "Unknown",
                     "analysis_date": datetime.now().strftime("%Y-%m-%d"),
+                    "comparison_valid": false,
+                    "industry_compatibility_reason": "Analysis failed - insufficient data to determine industries",
                     "overall_winner": "Tie",
                     "key_differentiator": "Analysis failed - insufficient data"
                 },
@@ -2869,7 +3056,11 @@ INSTRUCTIONS:
                 "comparison_summary": {
                     "company_a_name": "Company A",
                     "company_b_name": "Company B",
+                    "company_a_industry": "Unknown",
+                    "company_b_industry": "Unknown",
                     "analysis_date": datetime.now().strftime("%Y-%m-%d"),
+                    "comparison_valid": false,
+                    "industry_compatibility_reason": "Analysis error occurred",
                     "overall_winner": "Tie",
                     "key_differentiator": "Analysis error occurred"
                 },
