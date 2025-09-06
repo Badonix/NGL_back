@@ -2773,6 +2773,9 @@ IMPORTANT:
 - Maximum 8 competitors
 - Ensure all company names are spelled correctly
 - Match company size and market level appropriately
+
+--**Make sure they do exactly what that company does**
+
 """
 
     def _parse_competitor_response(self, response_text):
