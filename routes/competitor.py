@@ -15,20 +15,52 @@ gemini_extractor = GeminiFinancialExtractor()
 @handle_exceptions
 def analyze_competitors():
     """
-    Analyze uploaded company documents to identify competitors in the same industry
+    Analyze company documents and/or SEC data to identify competitors in the same industry
     """
     processed_files = []
     try:
-        # Check if files are uploaded
-        if "files" not in request.files:
-            return ErrorHandler.validation_error("No files uploaded")
+        # Get file uploads (optional now)
+        uploaded_files = request.files.getlist("files") if "files" in request.files else []
+        
+        # Get SEC data (optional)
+        company_sec_data = None
+        if "company_sec_data" in request.form:
+            try:
+                company_sec_data = json.loads(request.form["company_sec_data"])
+            except json.JSONDecodeError:
+                return ErrorHandler.validation_error("Invalid SEC data format")
+        
+        # Validate that we have some data
+        has_files = uploaded_files and not all(file.filename == "" for file in uploaded_files)
+        if not has_files and not company_sec_data:
+            return ErrorHandler.validation_error("Either files or company SEC data must be provided")
 
-        uploaded_files = request.files.getlist("files")
-        if not uploaded_files or all(file.filename == "" for file in uploaded_files):
-            return ErrorHandler.validation_error("No files selected")
-
-        # Process uploaded files
+        # Process company data (files + SEC data)
         combined_text = ""
+        
+        # Add SEC data if available
+        if company_sec_data:
+            combined_text += "--- SEC FINANCIAL DATA ---\n\n"
+            combined_text += f"Company: {company_sec_data.get('company_name', 'Unknown')}\n"
+            if company_sec_data.get('ticker'):
+                combined_text += f"Ticker: {company_sec_data['ticker']}\n"
+            combined_text += f"CIK: {company_sec_data.get('cik', 'Unknown')}\n\n"
+            
+            financials = company_sec_data.get('financials', {})
+            combined_text += "FINANCIAL METRICS:\n"
+            if financials.get('revenue'):
+                combined_text += f"Revenue: ${financials['revenue']:,.2f}\n"
+            if financials.get('net_income'):
+                combined_text += f"Net Income: ${financials['net_income']:,.2f}\n"
+            if financials.get('total_assets'):
+                combined_text += f"Total Assets: ${financials['total_assets']:,.2f}\n"
+            if financials.get('total_liabilities'):
+                combined_text += f"Total Liabilities: ${financials['total_liabilities']:,.2f}\n"
+            if financials.get('cash_and_equivalents'):
+                combined_text += f"Cash & Equivalents: ${financials['cash_and_equivalents']:,.2f}\n"
+            combined_text += "\n"
+        
+        # Process uploaded files
         for file in uploaded_files:
             if file.filename == "":
                 continue
@@ -50,7 +82,7 @@ def analyze_competitors():
             combined_text += extracted_text
 
         if not combined_text.strip():
-            return ErrorHandler.validation_error("No readable content found in uploaded files")
+            return ErrorHandler.validation_error("No readable content found for analysis")
 
         # Analyze competitors using Gemini
         if gemini_extractor:
@@ -78,25 +110,63 @@ def analyze_competitors():
 @handle_exceptions
 def compare_companies():
     """
-    Compare two companies based on their uploaded documents
+    Compare two companies based on their uploaded documents and/or SEC data
     """
     processed_files = []
     try:
-        # Check if files are uploaded
-        if "company_a_files" not in request.files or "company_b_files" not in request.files:
-            return ErrorHandler.validation_error("Both company A and company B files are required")
-
-        company_a_files = request.files.getlist("company_a_files")
-        company_b_files = request.files.getlist("company_b_files")
+        # Get file uploads (optional now)
+        company_a_files = request.files.getlist("company_a_files") if "company_a_files" in request.files else []
+        company_b_files = request.files.getlist("company_b_files") if "company_b_files" in request.files else []
         
-        if not company_a_files or not company_b_files:
-            return ErrorHandler.validation_error("Both companies must have files uploaded")
+        # Get SEC data (optional)
+        company_a_sec_data = None
+        company_b_sec_data = None
         
-        if all(file.filename == "" for file in company_a_files) or all(file.filename == "" for file in company_b_files):
-            return ErrorHandler.validation_error("Both companies must have valid files")
+        if "company_a_sec_data" in request.form:
+            try:
+                company_a_sec_data = json.loads(request.form["company_a_sec_data"])
+            except json.JSONDecodeError:
+                return ErrorHandler.validation_error("Invalid SEC data format for company A")
+        
+        if "company_b_sec_data" in request.form:
+            try:
+                company_b_sec_data = json.loads(request.form["company_b_sec_data"])
+            except json.JSONDecodeError:
+                return ErrorHandler.validation_error("Invalid SEC data format for company B")
+        
+        # Validate that we have data for both companies
+        has_company_a_data = (company_a_files and not all(file.filename == "" for file in company_a_files)) or company_a_sec_data
+        has_company_b_data = (company_b_files and not all(file.filename == "" for file in company_b_files)) or company_b_sec_data
+        
+        if not has_company_a_data or not has_company_b_data:
+            return ErrorHandler.validation_error("Both companies must have either uploaded files or SEC data")
 
-        # Process Company A files
+        # Process Company A data (files + SEC data)
         company_a_text = ""
+        
+        # Add SEC data if available
+        if company_a_sec_data:
+            company_a_text += "--- SEC FINANCIAL DATA ---\n\n"
+            company_a_text += f"Company: {company_a_sec_data.get('company_name', 'Unknown')}\n"
+            if company_a_sec_data.get('ticker'):
+                company_a_text += f"Ticker: {company_a_sec_data['ticker']}\n"
+            company_a_text += f"CIK: {company_a_sec_data.get('cik', 'Unknown')}\n\n"
+            
+            financials = company_a_sec_data.get('financials', {})
+            company_a_text += "FINANCIAL METRICS:\n"
+            if financials.get('revenue'):
+                company_a_text += f"Revenue: ${financials['revenue']:,.2f}\n"
+            if financials.get('net_income'):
+                company_a_text += f"Net Income: ${financials['net_income']:,.2f}\n"
+            if financials.get('total_assets'):
+                company_a_text += f"Total Assets: ${financials['total_assets']:,.2f}\n"
+            if financials.get('total_liabilities'):
+                company_a_text += f"Total Liabilities: ${financials['total_liabilities']:,.2f}\n"
+            if financials.get('cash_and_equivalents'):
+                company_a_text += f"Cash & Equivalents: ${financials['cash_and_equivalents']:,.2f}\n"
+            company_a_text += "\n"
+        
+        # Process uploaded files
         for file in company_a_files:
             if file.filename == "":
                 continue
@@ -115,8 +185,32 @@ def compare_companies():
                 company_a_text += f"--- FILE: {filename} ---\n\n"
             company_a_text += extracted_text
 
-        # Process Company B files
+        # Process Company B data (files + SEC data)
         company_b_text = ""
+        
+        # Add SEC data if available
+        if company_b_sec_data:
+            company_b_text += "--- SEC FINANCIAL DATA ---\n\n"
+            company_b_text += f"Company: {company_b_sec_data.get('company_name', 'Unknown')}\n"
+            if company_b_sec_data.get('ticker'):
+                company_b_text += f"Ticker: {company_b_sec_data['ticker']}\n"
+            company_b_text += f"CIK: {company_b_sec_data.get('cik', 'Unknown')}\n\n"
+            
+            financials = company_b_sec_data.get('financials', {})
+            company_b_text += "FINANCIAL METRICS:\n"
+            if financials.get('revenue'):
+                company_b_text += f"Revenue: ${financials['revenue']:,.2f}\n"
+            if financials.get('net_income'):
+                company_b_text += f"Net Income: ${financials['net_income']:,.2f}\n"
+            if financials.get('total_assets'):
+                company_b_text += f"Total Assets: ${financials['total_assets']:,.2f}\n"
+            if financials.get('total_liabilities'):
+                company_b_text += f"Total Liabilities: ${financials['total_liabilities']:,.2f}\n"
+            if financials.get('cash_and_equivalents'):
+                company_b_text += f"Cash & Equivalents: ${financials['cash_and_equivalents']:,.2f}\n"
+            company_b_text += "\n"
+        
+        # Process uploaded files
         for file in company_b_files:
             if file.filename == "":
                 continue
@@ -136,7 +230,7 @@ def compare_companies():
             company_b_text += extracted_text
 
         if not company_a_text.strip() or not company_b_text.strip():
-            return ErrorHandler.validation_error("No readable content found in one or both companies' files")
+            return ErrorHandler.validation_error("No readable content found for one or both companies")
 
         # Compare companies using Gemini
         if gemini_extractor:

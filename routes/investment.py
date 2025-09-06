@@ -368,6 +368,121 @@ def calculate_investment_validity():
                 pass
 
 
+@investment_bp.route("/investment-calculate-validity-fast", methods=["POST"])
+@handle_exceptions
+def calculate_investment_validity_fast():
+    processed_files = []
+    additional_file_text = ""
+
+    try:
+        content_type = request.content_type or ""
+        is_multipart = content_type.startswith("multipart/form-data")
+        is_json = content_type.startswith("application/json")
+
+        financial_data = None
+        valuation_data = None
+        investment_data = None
+        
+        if is_multipart:
+            # Handle multipart form data (with potential file uploads)
+            
+            # Process any uploaded files
+            if request.files and "files" in request.files:
+                uploaded_files = request.files.getlist("files")
+                
+                for file in uploaded_files:
+                    if file.filename == "":
+                        continue
+
+                    filepath, filename = FileService.save_uploaded_file(file)
+                    extracted_text = TextExtractor.extract_text_from_file(filepath)
+
+                    processed_files.append({
+                        "filename": filename,
+                        "filepath": filepath,
+                        "text_length": len(extracted_text),
+                    })
+
+                    if additional_file_text:
+                        additional_file_text += f"\n\n--- ADDITIONAL FILE: {filename} ---\n\n"
+                    else:
+                        additional_file_text += f"--- ADDITIONAL FILE: {filename} ---\n\n"
+
+                    additional_file_text += extracted_text
+
+            # Get JSON data from form fields
+            try:
+                financial_data_str = request.form.get("financial_data")
+                if financial_data_str:
+                    financial_data = json.loads(financial_data_str)
+            except json.JSONDecodeError:
+                pass
+
+            try:
+                valuation_data_str = request.form.get("valuation_data")
+                if valuation_data_str:
+                    valuation_data = json.loads(valuation_data_str)
+            except json.JSONDecodeError:
+                pass
+
+            try:
+                investment_data_str = request.form.get("investment_data")
+                if investment_data_str:
+                    investment_data = json.loads(investment_data_str)
+            except json.JSONDecodeError:
+                pass
+
+
+        elif is_json:
+            # Handle pure JSON data (legacy support)
+            data = request.get_json()
+            if data:
+                financial_data = data.get("financial_data")
+                valuation_data = data.get("valuation_data")
+                investment_data = data.get("investment_data")
+        else:
+            return ErrorHandler.validation_error("Unsupported content type. Use multipart/form-data or application/json.")
+
+        # Validate required data
+        if not all([financial_data, valuation_data, investment_data]):
+            return ErrorHandler.validation_error(
+                "Financial data, valuation data, and investment data are all required"
+            )
+
+        # Add any additional files uploaded for this analysis to investment data
+        if additional_file_text:
+            if not isinstance(investment_data, dict):
+                investment_data = {}
+            
+            investment_data["additional_file_content"] = additional_file_text
+            investment_data["additional_files_count"] = len(processed_files)
+                
+            print(f"DEBUG FAST VALIDITY: Added {len(processed_files)} additional files")
+            print(f"DEBUG FAST VALIDITY: Additional content length: {len(additional_file_text):,} characters")
+
+        if gemini_extractor:
+            validity_result = gemini_extractor.calculate_investment_validity_fast(
+                financial_data, valuation_data, investment_data
+            )
+        else:
+            validity_result = {
+                "success": False,
+                "error": "Gemini API not configured. Please set GEMINI_API_KEY environment variable.",
+            }
+
+        return ResponseFormatter.format_validity_response(validity_result)
+
+    except Exception as e:
+        return ErrorHandler.processing_error(str(e))
+    finally:
+        # Cleanup uploaded files
+        for file_info in processed_files:
+            try:
+                FileService.cleanup_file(file_info["filepath"])
+            except:
+                pass
+
+
 @investment_bp.route("/investment-find-investors", methods=["POST"])
 @handle_exceptions
 def find_investors():

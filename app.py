@@ -9,6 +9,7 @@ from routes.investment import investment_bp
 from routes.loan import loan_bp
 from routes.startup import startup_bp
 from routes.competitor import competitor_bp
+from routes.sec_lookup import sec_lookup_bp
 
 
 def create_app():
@@ -35,6 +36,7 @@ def create_app():
     app.register_blueprint(loan_bp)
     app.register_blueprint(startup_bp)
     app.register_blueprint(competitor_bp)
+    app.register_blueprint(sec_lookup_bp)
 
     return app
 

@@ -1811,6 +1811,55 @@ IMPORTANT INSTRUCTIONS:
 
 Analyze the provided loan request data and return the JSON structure."""
 
+    def calculate_investment_validity_fast(self, financial_data, valuation_data, investment_data):
+        """
+        Calculate investment validity using only Gemini (fast single-model version)
+        """
+        try:
+            # Build the same comprehensive prompt that OpenRouter uses
+            prompt = self._build_investment_validity_prompt(financial_data, valuation_data, investment_data)
+            
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,
+                    max_output_tokens=2000,
+                ),
+            )
+            
+            if not response.text:
+                return {
+                    "success": False,
+                    "error": "Empty response from Gemini API"
+                }
+                
+            parsed_response = self._parse_investment_validity_response(response.text)
+            
+            # Create individual response structure matching OpenRouter format
+            individual_response = {
+                "model": "google/gemini-pro",
+                "weight": 1.0,
+                "response": parsed_response,
+                "success": True,
+                "processing_time": 0.0  # Could add timing if needed
+            }
+            
+            return {
+                "success": True,
+                "data": {
+                    "individual_responses": [individual_response],
+                    "final_decision": parsed_response,
+                    "models_used": 1,
+                    "total_models": 1,
+                }
+            }
+            
+        except Exception as e:
+            return {
+                "success": False, 
+                "error": f"Gemini investment validity calculation error: {str(e)}"
+            }
+
     def find_investors(self, financial_data, valuation_data, investment_data):
         """
         Use Gemini to search for potential investors and investment opportunities based on the business analysis
@@ -2736,7 +2785,7 @@ You must return ONLY a valid JSON object with this exact structure:
     "analysis_date": "2024-01-01",
     "comparison_valid": true,
     "industry_compatibility_reason": "Explanation of why comparison is valid/invalid",
-    "overall_winner": "Company A/Company B/Tie",
+    "overall_winner": "Primary/Competitor/Tie",
     "key_differentiator": "Brief explanation of main difference"
   },
   "financial_comparison": {
@@ -2751,7 +2800,7 @@ You must return ONLY a valid JSON object with this exact structure:
         "growth_rate": 0.10,
         "trend": "Growing/Stable/Declining"
       },
-      "winner": "Company A/Company B/Tie",
+      "winner": "Primary/Competitor/Tie",
       "analysis": "Detailed comparison of revenue performance"
     },
     "profitability": {
@@ -2765,7 +2814,7 @@ You must return ONLY a valid JSON object with this exact structure:
         "gross_margin": 0.40,
         "ebitda_margin": 0.15
       },
-      "winner": "Company A/Company B/Tie",
+      "winner": "Primary/Competitor/Tie",
       "analysis": "Detailed comparison of profitability metrics"
     },
     "growth": {
@@ -2779,7 +2828,7 @@ You must return ONLY a valid JSON object with this exact structure:
         "profit_growth": 0.12,
         "market_expansion": "Description"
       },
-      "winner": "Company A/Company B/Tie",
+      "winner": "Primary/Competitor/Tie",
       "analysis": "Detailed comparison of growth metrics"
     }
   },
@@ -2795,7 +2844,7 @@ You must return ONLY a valid JSON object with this exact structure:
         "cost_management": "Excellent/Good/Poor",
         "asset_utilization": "Description"
       },
-      "winner": "Company A/Company B/Tie",
+      "winner": "Primary/Competitor/Tie",
       "analysis": "Detailed comparison of operational efficiency"
     },
     "market_position": {
@@ -2809,7 +2858,7 @@ You must return ONLY a valid JSON object with this exact structure:
         "competitive_advantages": ["Advantage 1", "Advantage 2"],
         "brand_strength": "Strong/Medium/Weak"
       },
-      "winner": "Company A/Company B/Tie",
+      "winner": "Primary/Competitor/Tie",
       "analysis": "Detailed comparison of market positioning"
     }
   },
@@ -2881,7 +2930,7 @@ You must return ONLY a valid JSON object with this exact structure:
           }
         }
       },
-      "winner": "Company A/Company B/Tie",
+      "winner": "Primary/Competitor/Tie",
       "analysis": "Detailed valuation comparison with DCF and multiples analysis"
     },
     "risk_assessment": {
@@ -2939,11 +2988,11 @@ You must return ONLY a valid JSON object with this exact structure:
         "overall_risk_score": 3.6,
         "risk_rating": "Medium-High"
       },
-      "winner": "Company A/Company B/Tie",
+      "winner": "Primary/Competitor/Tie",
       "analysis": "Comprehensive risk analysis covering financial stability, market risks, and investment-specific factors"
     },
     "investment_recommendation": {
-      "preferred_investment": "Company A/Company B/Both/Neither",
+      "preferred_investment": "Primary/Competitor/Both/Neither",
       "investment_rationale": "Detailed explanation based on valuation and risk analysis",
       "key_factors": ["Factor 1", "Factor 2", "Factor 3"],
       "risk_adjusted_returns": {
@@ -3066,4 +3115,173 @@ INSTRUCTIONS:
                 },
                 "error": f"Unexpected error: {str(e)}",
                 "raw_response": response_text[:500] if response_text else "No response"
+            }
+
+    def _build_investment_validity_prompt(self, financial_data, valuation_data, investment_data):
+        """Build the fast investment validity prompt for Gemini (simplified but complete)"""
+        prompt = f"""Fast Investment Analysis - Single Model Assessment
+
+ROLE
+You are a senior investment analyst providing a CONCISE but COMPLETE investment assessment. Analyze the provided data and return a simplified investment decision with all required fields. Keep analysis brief but comprehensive.
+
+INPUT DATA
+
+FINANCE_JSON:
+{json.dumps(financial_data, indent=2)}
+
+VALUATION_JSON:
+{json.dumps(valuation_data, indent=2)}
+
+NEW_INFO_JSON:
+{json.dumps(investment_data, indent=2)}
+
+TASK
+Provide a FAST but COMPLETE investment analysis. Keep explanations CONCISE (1-2 sentences max per field). Include all required fields but with simplified content.
+
+ALL DATA IS IN GEL CURRENCY.
+
+If no equity specified, suggest reasonable equity (10-25%) based on company stage.
+If no valuation specified, estimate based on sector and stage.
+
+OUTPUT_SCHEMA (return exactly this JSON structure):
+
+{{
+  "verdict": "invest" | "consider_with_conditions" | "dont_invest" | "insufficient_data",
+  "confidence": <number 0-100>,
+  "valuation": {{
+    "raw": {{"p25": <number>, "p50": <number>, "p75": <number>}},
+    "adjusted": {{"p25": <number>, "p50": <number>, "p75": <number>}},
+    "method_breakdown": {{
+      "dcf": {{"p25":<number>,"p50":<number>,"p75":<number>,"confidence":<number>}} | null,
+      "multiples": {{"p25":<number>,"p50":<number>,"p75":<number>,"confidence":<number>}} | null,
+      "precedent": {{"p25":<number>,"p50":<number>,"p75":<number>,"confidence":<number>}} | null,
+      "rule_of_thumb": {{"p25":<number>,"p50":<number>,"p75":<number>,"confidence":<number>}} | null
+    }}
+  }},
+  "recommended_offer": {{"raise_amount": <number>, "equity_pct": <number>, "terms": "<brief terms>"}},
+  "cap_table_impact": {{"price_per_share_pre": <number>, "new_shares": <number>, "total_shares_after": <number>, "investor_pct_after": <number>}},
+  "offer_assessment": {{
+    "status": "attractive" | "fair" | "expensive" | "inconsistent" | "insufficient_data",
+    "details": "<brief 1-2 sentence explanation>",
+    "implied_pre_money_from_offer": <number>,
+    "implied_percent_from_raise": <number>,
+    "implied_amount_from_equity_pct": <number>,
+    "consistency_check": "consistent" | "inconsistent" | "insufficient_data"
+  }},
+  "risk_score": <number 0-1>,
+  "top_evidence": [
+    {{"title": "<brief title>", "value": <number or string>, "source": "<source>", "why": "<brief reason>"}}
+  ],
+  "rationale": ["<brief point 1>", "<brief point 2>", "<brief point 3>"],
+  "follow_up_questions": ["<question 1>", "<question 2>"],
+  "provenance": {{"internal_docs": ["<doc>"], "external_apis": [], "timestamp": "<ISO 8601 UTC>"}},
+  "simple_summary": {{
+    "headline": "<single clear sentence about investment decision>",
+    "why": "<1-2 sentence rationale>",
+    "risk_and_consistency": "<1-2 sentence risk assessment>",
+    "next_steps": "<1-2 sentence next steps>"
+  }},
+  "aggregation_summary": {{
+    "models_consensus": "Single Gemini model analysis",
+    "key_disagreements": "N/A - single model",
+    "final_reasoning": "<brief reasoning for decision>",
+    "confidence_basis": "<brief confidence explanation>"
+  }},
+  "investment_analysis": {{
+    "why_invest": "<brief 1-2 sentence reason>",
+    "growth_potential": "<brief growth assessment>",
+    "market_opportunity": "<brief market size/opportunity>",
+    "competitive_advantages": "<brief competitive edge>",
+    "key_risks": "<brief main risks>",
+    "mitigation_strategies": "<brief risk mitigation>",
+    "expected_returns": "<brief return expectations>",
+    "timeline_expectations": "<brief timeline>"
+  }}
+}}
+
+INSTRUCTIONS:
+- Keep ALL text fields BRIEF (1-2 sentences maximum)
+- Provide realistic numbers based on the data
+- Use null for unavailable data
+- Include current timestamp
+- Focus on key insights, not detailed analysis
+- Ensure all required fields are present
+
+Return ONLY the JSON structure:"""
+
+        return prompt
+
+    def _parse_investment_validity_response(self, response_text):
+        """Parse investment validity response from Gemini (reuse existing parser)"""
+        return self._parse_investment_response(response_text)
+    
+    def resolve_company_name(self, user_input, available_companies):
+        """
+        Use Gemini to resolve user input to official SEC company names
+        
+        Args:
+            user_input: What the user typed (e.g., "Google", "mictosoft")
+            available_companies: List of actual SEC company names and tickers
+            
+        Returns:
+            Dict with resolved company suggestions
+        """
+        
+        # Limit available companies to avoid huge prompts
+        company_sample = available_companies[:500] if len(available_companies) > 500 else available_companies
+        
+        prompt = f"""
+You are a company name resolver for SEC database lookups. 
+
+User typed: "{user_input}"
+
+Available companies in SEC database (sample):
+{', '.join(company_sample)}
+
+Task: Determine what company the user likely meant and suggest the best matches from the available companies.
+
+Consider:
+- Common company names vs official SEC names (e.g., "Google" → "Alphabet Inc.")
+- Typos and misspellings (e.g., "mictosoft" → "Microsoft Corp")
+- Ticker symbols (e.g., "AAPL" → "Apple Inc.")
+- Partial names (e.g., "Apple" → "Apple Inc.")
+
+Return ONLY a JSON array with top 3 suggestions, ordered by confidence:
+[
+  {{
+    "company_name": "Exact name from available companies",
+    "confidence": 95,
+    "reason": "Why this matches (e.g., 'Common name for Alphabet Inc.')"
+  }}
+]
+
+If no reasonable matches found, return empty array [].
+"""
+        
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config=self.generation_config
+            )
+            
+            # Parse JSON response
+            response_text = response.text.strip()
+            if response_text.startswith('```json'):
+                response_text = response_text[7:-3]
+            elif response_text.startswith('```'):
+                response_text = response_text[3:-3]
+                
+            suggestions = json.loads(response_text)
+            
+            return {
+                "success": True,
+                "suggestions": suggestions,
+                "error": None
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "suggestions": [],
+                "error": f"Company name resolution failed: {str(e)}"
             }
