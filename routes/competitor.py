@@ -5,6 +5,7 @@ from services.text_extractor import TextExtractor
 from services.gemini_service import GeminiFinancialExtractor
 from services.response_formatter import ResponseFormatter
 from services.error_handler import ErrorHandler, handle_exceptions
+from services.sec_lookup import sec_lookup_service
 
 competitor_bp = Blueprint("competitor", __name__)
 
@@ -230,3 +231,65 @@ def compare_companies():
                 FileService.cleanup_file(file_info["filepath"])
             except:
                 pass
+
+
+@competitor_bp.route("/competitor-lookup", methods=["POST"])
+@handle_exceptions
+def lookup_competitor():
+    """
+    Look up competitor data via SEC.gov first, fallback to Gemini if not found
+    """
+    try:
+        data = request.get_json()
+        if not data or 'competitor_name' not in data:
+            return ErrorHandler.validation_error("Competitor name is required")
+
+        competitor_name = data['competitor_name'].strip()
+        if not competitor_name:
+            return ErrorHandler.validation_error("Competitor name cannot be empty")
+
+        print(f"🔍 Looking up competitor: {competitor_name}")
+
+        # First try SEC.gov lookup
+        sec_result = sec_lookup_service.lookup_company(competitor_name, threshold=75)
+        
+        if sec_result.get("success") and sec_result.get("data"):
+            print(f"✅ Found {competitor_name} on SEC.gov")
+            return ResponseFormatter.success_response(
+                data=sec_result["data"],
+                message=f"Found {competitor_name} on SEC.gov",
+                source="SEC.gov"
+            )
+        
+        print(f"❌ {competitor_name} not found on SEC.gov, trying Gemini fallback")
+        
+        # Fallback to Gemini for financial info
+        if gemini_extractor:
+            try:
+                gemini_result = gemini_extractor.get_competitor_financial_info(competitor_name)
+                
+                if gemini_result.get("success") and gemini_result.get("data"):
+                    print(f"✅ Generated financial info for {competitor_name} using Gemini")
+                    return ResponseFormatter.success_response(
+                        data=gemini_result["data"],
+                        message=f"Generated financial info for {competitor_name} using AI",
+                        source="Gemini AI"
+                    )
+                else:
+                    print(f"❌ Gemini failed to generate info for {competitor_name}")
+                    return ErrorHandler.validation_error(
+                        f"Could not find financial data for {competitor_name}. Please upload files manually or enter the company name manually."
+                    )
+            except Exception as gemini_error:
+                print(f"❌ Gemini error for {competitor_name}: {str(gemini_error)}")
+                return ErrorHandler.validation_error(
+                    f"Could not find financial data for {competitor_name}. Please upload files manually or enter the company name manually."
+                )
+        else:
+            return ErrorHandler.validation_error(
+                "Gemini API not configured and company not found on SEC.gov. Please upload files manually."
+            )
+
+    except Exception as e:
+        print(f"❌ Competitor lookup error: {str(e)}")
+        return ErrorHandler.processing_error(f"Competitor lookup failed: {str(e)}")

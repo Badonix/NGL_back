@@ -2822,6 +2822,91 @@ IMPORTANT:
                 "raw_response": response_text[:500] if response_text else "No response"
             }
 
+    def get_competitor_financial_info(self, company_name):
+        """
+        Use Gemini to generate financial information for a competitor company
+        """
+        try:
+            prompt = f"""Generate realistic financial information for the company "{company_name}".
+
+IMPORTANT INSTRUCTIONS:
+- Return ONLY a JSON object with the specified format
+- Use realistic financial figures based on the company's known size and industry
+- If the company doesn't exist or you're unsure, provide estimates based on similar companies in the industry
+- All monetary values should be in USD
+- Provide at least 2-3 years of basic financial data
+
+OUTPUT FORMAT (JSON only, no additional text):
+{{
+    "company_name": "{company_name}",
+    "ticker": "ESTIMATED_TICKER_OR_NULL",
+    "cik": null,
+    "financials": {{
+        "revenue": estimated_annual_revenue_number,
+        "net_income": estimated_net_income_number,
+        "total_assets": estimated_total_assets_number,
+        "total_liabilities": estimated_total_liabilities_number,
+        "cash_and_equivalents": estimated_cash_number,
+        "raw_data": {{
+            "source": "AI_generated",
+            "confidence": "medium_or_high_or_low",
+            "notes": "Brief explanation of estimates"
+        }}
+    }},
+    "match_score": 85,
+    "timestamp": "2024-01-01T00:00:00Z"
+}}
+
+Generate for: {company_name}"""
+
+            response = self.model.generate_content(
+                prompt, generation_config={"max_output_tokens": 2048, "temperature": 0.2}
+            )
+
+            if not response or not response.text:
+                raise ValueError("No response generated from Gemini")
+
+            response_text = response.text.strip()
+            
+            # Parse JSON response
+            try:
+                if response_text.startswith("```json") and response_text.endswith("```"):
+                    json_text = response_text[7:-3].strip()
+                elif response_text.startswith("```") and response_text.endswith("```"):
+                    json_text = response_text[3:-3].strip()
+                else:
+                    start_idx = response_text.find("{")
+                    end_idx = response_text.rfind("}")
+                    if start_idx >= 0 and end_idx > start_idx:
+                        json_text = response_text[start_idx : end_idx + 1]
+                    else:
+                        json_text = response_text
+
+                import json
+                from datetime import datetime, timezone
+                
+                financial_data = json.loads(json_text)
+                
+                # Add timestamp if not present
+                if "timestamp" not in financial_data:
+                    financial_data["timestamp"] = datetime.now(timezone.utc).isoformat()
+                
+                return {"success": True, "data": financial_data}
+
+            except json.JSONDecodeError as e:
+                return {
+                    "success": False,
+                    "error": f"Failed to parse financial data: {str(e)}",
+                    "raw_response": response_text[:500]
+                }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Financial info generation error: {str(e)}",
+                "raw_response": None
+            }
+
     def compare_companies(self, company_a_data, company_b_data):
         """
         Use Gemini to compare two companies based on their financial documents
