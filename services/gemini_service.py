@@ -3,6 +3,9 @@ import json
 from datetime import datetime
 from config import Config
 from .pdf_generator import PDFGenerator
+from langchain_google_genai import GoogleGenerativeAI
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 
 
 class GeminiFinancialExtractor:
@@ -22,8 +25,160 @@ class GeminiFinancialExtractor:
         self.financial_prompt = self._get_financial_prompt()
         self.investment_prompt = self._get_investment_prompt()
         self.loan_prompt = self._get_loan_prompt()
+        
+        # LangChain setup for extraction and fast investment analysis
+        try:
+            # LLM for financial extraction (higher token limit)
+            self.langchain_extraction_llm = GoogleGenerativeAI(
+                model="gemini-2.5-flash-lite",
+                google_api_key=Config.GEMINI_API_KEY,
+                temperature=0.1,
+                max_output_tokens=16384  # Same as original config
+            )
+            
+            # LLM for fast investment (lower token limit)
+            self.langchain_llm = GoogleGenerativeAI(
+                model="gemini-2.5-flash-lite",
+                google_api_key=Config.GEMINI_API_KEY,
+                temperature=0.1,
+                max_output_tokens=2000
+            )
+            
+            # Store the fast investment template (will use direct LLM calls)
+            self.fast_investment_template_text = self._get_fast_investment_template()
+            
+            # Use LangChain LLM directly instead of chain to avoid template issues
+            self.fast_investment_chain = None
+            
+            print("DEBUG: LangChain extraction and fast investment LLMs initialized successfully")
+        except Exception as e:
+            print(f"WARNING: LangChain initialization failed: {e}, will use fallback")
+            self.langchain_extraction_llm = None
+            self.langchain_llm = None
+            self.fast_investment_chain = None
+
+    def _get_fast_investment_template(self):
+        """Get the fast investment prompt as a LangChain template"""
+        return """Fast Investment Analysis - Single Model Assessment
+
+ROLE
+You are a senior investment analyst providing a CONCISE but COMPLETE investment assessment. Analyze the provided data and return a simplified investment decision with all required fields. Keep analysis brief but comprehensive.
+
+INPUT DATA
+
+FINANCE_JSON:
+{financial_data}
+
+VALUATION_JSON:
+{valuation_data}
+
+NEW_INFO_JSON:
+{investment_data}
+
+TASK
+Provide a FAST but COMPLETE investment analysis. Keep explanations CONCISE (1-2 sentences max per field). Include all required fields but with simplified content.
+
+ALL DATA IS IN GEL CURRENCY.
+
+If no equity specified, suggest reasonable equity (10-25%) based on company stage.
+If no valuation specified, estimate based on sector and stage.
+
+OUTPUT_SCHEMA (return exactly this JSON structure):
+
+{{
+  "verdict": "invest" | "consider_with_conditions" | "dont_invest" | "insufficient_data",
+  "confidence": <number 0-100>,
+  "valuation": {{
+    "raw": {{"p25": <number>, "p50": <number>, "p75": <number>}},
+    "adjusted": {{"p25": <number>, "p50": <number>, "p75": <number>}},
+    "method_breakdown": {{
+      "dcf": {{"p25":<number>,"p50":<number>,"p75":<number>,"confidence":<number>}} | null,
+      "multiples": {{"p25":<number>,"p50":<number>,"p75":<number>,"confidence":<number>}} | null,
+      "precedent": {{"p25":<number>,"p50":<number>,"p75":<number>,"confidence":<number>}} | null,
+      "rule_of_thumb": {{"p25":<number>,"p50":<number>,"p75":<number>,"confidence":<number>}} | null
+    }}
+  }},
+  "recommended_offer": {{"raise_amount": <number>, "equity_pct": <number>, "terms": "<brief terms>"}},
+  "cap_table_impact": {{"price_per_share_pre": <number>, "new_shares": <number>, "total_shares_after": <number>, "investor_pct_after": <number>}},
+  "offer_assessment": {{
+    "status": "attractive" | "fair" | "expensive" | "inconsistent" | "insufficient_data",
+    "details": "<brief 1-2 sentence explanation>",
+    "implied_pre_money_from_offer": <number>,
+    "implied_percent_from_raise": <number>,
+    "implied_amount_from_equity_pct": <number>,
+    "consistency_check": "consistent" | "inconsistent" | "insufficient_data"
+  }}
+}}
+
+IMPORTANT: Return ONLY the JSON structure above. No explanations or markdown outside the JSON."""
 
     def extract_financial_data(self, document_text):
+        # Try LangChain first if available
+        if self.langchain_extraction_llm:
+            try:
+                print("DEBUG: Using LangChain for financial data extraction")
+                
+                full_prompt = self.financial_prompt + document_text
+                print(f"DEBUG: Sending {len(document_text)} characters to LangChain")
+                print(f"DEBUG: Document contains {document_text.count('--- FILE:')} file separators")
+                
+                response_text = self.langchain_extraction_llm.invoke(full_prompt)
+                
+                if not response_text:
+                    raise ValueError("No response from LangChain")
+                
+                print(f"LangChain response length: {len(response_text)} characters")
+                
+                if len(response_text.strip()) < 10:
+                    raise ValueError(f"Response too short: '{response_text.strip()}'")
+
+                financial_data = self._parse_response(response_text)
+                
+                print(f"DEBUG: Parsed financial_analysis keys: {financial_data.get('financial_analysis', {}).keys() if 'financial_analysis' in financial_data else 'No financial_analysis'}")
+                if 'financial_analysis' in financial_data and 'income_statement' in financial_data['financial_analysis']:
+                    revenue_years = list(financial_data['financial_analysis']['income_statement'].get('revenue_sales', {}).keys())
+                    print(f"DEBUG: Revenue data extracted for years: {revenue_years}")
+                    
+                    # Log a sample of the raw response to see what AI is returning
+                    print(f"DEBUG: Raw response preview: {response_text[:500]}...")
+                    if "2021" in response_text or "2022" in response_text:
+                        print(f"DEBUG: Found 2021/2022 in raw response but not in parsed data!")
+                    
+                    # Check all financial statement sections for years
+                    for section_name, section_data in financial_data['financial_analysis'].items():
+                        if isinstance(section_data, dict):
+                            all_years = set()
+                            for item_name, item_data in section_data.items():
+                                if isinstance(item_data, dict):
+                                    all_years.update(item_data.keys())
+                            if all_years:
+                                print(f"DEBUG: {section_name} contains years: {sorted(all_years)}")
+                
+                # Check summarized_data for year mentions
+                if 'summerized_data' in financial_data:
+                    summarized_text = str(financial_data['summerized_data'])
+                    years_in_summary = []
+                    for year in ['2021', '2022', '2023', '2024', '2025']:
+                        if year in summarized_text:
+                            years_in_summary.append(year)
+                    print(f"DEBUG: summarized_data mentions years: {years_in_summary}")
+                    print(f"DEBUG: summarized_data length: {len(summarized_text)} characters")
+                    
+                pdf_result = self._generate_pdf_if_needed(financial_data)
+
+                return {
+                    "success": True,
+                    "data": financial_data,
+                    "pdf_result": pdf_result,
+                    "used_langchain": True
+                }
+                
+            except Exception as e:
+                print(f"DEBUG: LangChain extraction failed: {e}, falling back to original Gemini")
+                # Continue to fallback below
+        
+        # Fallback to original Gemini method
+        print("DEBUG: Using fallback Gemini for financial data extraction")
         for attempt in range(2):
             try:
                 if attempt == 0:
@@ -94,6 +249,7 @@ class GeminiFinancialExtractor:
                     "success": True,
                     "data": financial_data,
                     "pdf_result": pdf_result,
+                    "used_langchain": False
                 }
 
             except Exception as e:
@@ -125,6 +281,27 @@ class GeminiFinancialExtractor:
                 continue
 
     def analyze_investment_data(self, document_text):
+        # Try LangChain first if available
+        if self.langchain_extraction_llm:
+            try:
+                print("DEBUG: Using LangChain for investment data analysis")
+                
+                full_prompt = self.investment_prompt + document_text
+                response_text = self.langchain_extraction_llm.invoke(full_prompt)
+
+                if not response_text:
+                    raise ValueError("No response generated from LangChain")
+
+                investment_data = self._parse_investment_response(response_text)
+
+                return {"success": True, "data": investment_data, "used_langchain": True}
+                
+            except Exception as e:
+                print(f"DEBUG: LangChain investment analysis failed: {e}, falling back to original Gemini")
+                # Continue to fallback below
+        
+        # Fallback to original Gemini method
+        print("DEBUG: Using fallback Gemini for investment data analysis")
         try:
             full_prompt = self.investment_prompt + document_text
             response = self.model.generate_content(
@@ -136,7 +313,7 @@ class GeminiFinancialExtractor:
 
             investment_data = self._parse_investment_response(response.text)
 
-            return {"success": True, "data": investment_data}
+            return {"success": True, "data": investment_data, "used_langchain": False}
 
         except Exception as e:
             return {
@@ -1813,52 +1990,135 @@ Analyze the provided loan request data and return the JSON structure."""
 
     def calculate_investment_validity_fast(self, financial_data, valuation_data, investment_data):
         """
-        Calculate investment validity using only Gemini (fast single-model version)
+        Calculate investment validity using LangChain + Gemini (fast single-model version)
         """
         try:
-            # Build the same comprehensive prompt that OpenRouter uses
-            prompt = self._build_investment_validity_prompt(financial_data, valuation_data, investment_data)
-            
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.1,
-                    max_output_tokens=2000,
-                ),
-            )
-            
-            if not response.text:
-                return {
-                    "success": False,
-                    "error": "Empty response from Gemini API"
+            # Try LangChain first
+            if self.langchain_llm:
+                print("DEBUG: Using LangChain LLM for fast investment analysis")
+                
+                # Manually format the prompt (avoiding template issues)
+                formatted_prompt = self.fast_investment_template_text.format(
+                    financial_data=json.dumps(financial_data, indent=2),
+                    valuation_data=json.dumps(valuation_data, indent=2),
+                    investment_data=json.dumps(investment_data, indent=2)
+                )
+                
+                # Use LangChain LLM directly
+                response_text = self.langchain_llm.invoke(formatted_prompt)
+                
+                if not response_text:
+                    raise ValueError("Empty response from LangChain")
+                
+                parsed_response = self._parse_investment_validity_response(response_text)
+                
+                # Create individual response structure matching OpenRouter format
+                individual_response = {
+                    "model": "langchain/gemini-2.5-flash-lite",
+                    "weight": 1.0,
+                    "response": parsed_response,
+                    "success": True,
+                    "processing_time": 0.0
                 }
                 
-            parsed_response = self._parse_investment_validity_response(response.text)
-            
-            # Create individual response structure matching OpenRouter format
-            individual_response = {
-                "model": "google/gemini-pro",
-                "weight": 1.0,
-                "response": parsed_response,
-                "success": True,
-                "processing_time": 0.0  # Could add timing if needed
-            }
-            
-            return {
-                "success": True,
-                "data": {
-                    "individual_responses": [individual_response],
-                    "final_decision": parsed_response,
-                    "models_used": 1,
-                    "total_models": 1,
+                return {
+                    "success": True,
+                    "data": {
+                        "individual_responses": [individual_response],
+                        "final_decision": parsed_response,
+                        "models_used": 1,
+                        "total_models": 1,
+                        "used_langchain": True
+                    }
                 }
-            }
+            
+            else:
+                print("DEBUG: LangChain not available, using fallback Gemini")
+                # Fallback to original method
+                prompt = self._build_investment_validity_prompt(financial_data, valuation_data, investment_data)
+                
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.1,
+                        max_output_tokens=2000,
+                    ),
+                )
+                
+                if not response.text:
+                    return {
+                        "success": False,
+                        "error": "Empty response from Gemini API"
+                    }
+                    
+                parsed_response = self._parse_investment_validity_response(response.text)
+                
+                # Create individual response structure matching OpenRouter format
+                individual_response = {
+                    "model": "google/gemini-pro",
+                    "weight": 1.0,
+                    "response": parsed_response,
+                    "success": True,
+                    "processing_time": 0.0
+                }
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "individual_responses": [individual_response],
+                        "final_decision": parsed_response,
+                        "models_used": 1,
+                        "total_models": 1,
+                        "used_langchain": False
+                    }
+                }
             
         except Exception as e:
-            return {
-                "success": False, 
-                "error": f"Gemini investment validity calculation error: {str(e)}"
-            }
+            print(f"DEBUG: LangChain fast investment failed: {e}, trying fallback")
+            # Final fallback to original method
+            try:
+                prompt = self._build_investment_validity_prompt(financial_data, valuation_data, investment_data)
+                
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.1,
+                        max_output_tokens=2000,
+                    ),
+                )
+                
+                if not response.text:
+                    return {
+                        "success": False,
+                        "error": "Empty response from Gemini API"
+                    }
+                    
+                parsed_response = self._parse_investment_validity_response(response.text)
+                
+                individual_response = {
+                    "model": "google/gemini-pro-fallback",
+                    "weight": 1.0,
+                    "response": parsed_response,
+                    "success": True,
+                    "processing_time": 0.0
+                }
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "individual_responses": [individual_response],
+                        "final_decision": parsed_response,
+                        "models_used": 1,
+                        "total_models": 1,
+                        "used_langchain": False,
+                        "fallback": True
+                    }
+                }
+            except Exception as fallback_e:
+                return {
+                    "success": False, 
+                    "error": f"Fast investment analysis error: {str(fallback_e)}"
+                }
 
     def find_investors(self, financial_data, valuation_data, investment_data):
         """

@@ -1,6 +1,11 @@
 import google.generativeai as genai
 import json
+import hashlib
+from datetime import datetime
 from config import Config
+from langchain_google_genai import GoogleGenerativeAI
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 
 
 class ValuationService:
@@ -8,6 +13,7 @@ class ValuationService:
         if not Config.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY environment variable is required")
 
+        # Original Gemini setup (keeping as fallback)
         genai.configure(api_key=Config.GEMINI_API_KEY)
         self.model = genai.GenerativeModel("gemini-2.0-flash-exp")
 
@@ -16,29 +22,115 @@ class ValuationService:
             "temperature": 0.2,
         }
 
-        self.valuation_prompt = self._get_valuation_prompt()
+        # LangChain setup
+        self.langchain_llm = GoogleGenerativeAI(
+            model="gemini-2.0-flash-exp",
+            google_api_key=Config.GEMINI_API_KEY,
+            temperature=0.2,
+            max_output_tokens=8192
+        )
+        
+        # Memory for caching valuations (per-session)
+        self.valuation_memory = {}
+        
+        # Create simple prompt template (avoiding complex formatting issues)
+        self.valuation_prompt_text = self._get_valuation_prompt()
+        
+        # Create LangChain chain without template (due to complex prompt formatting)
+        # We'll manually format the prompt in the method
+        self.valuation_chain = None  # Will use direct LLM calls
 
     def perform_valuation(self, financial_data):
         try:
+            # Generate memory key based on company name + timestamp (within same day)
+            memory_key = self._generate_memory_key(financial_data)
+            
+            # Check if we have cached result
+            if memory_key in self.valuation_memory:
+                print(f"DEBUG: Using cached valuation for key: {memory_key}")
+                return {"success": True, "data": self.valuation_memory[memory_key], "cached": True}
+            
+            print(f"DEBUG: Computing new valuation for key: {memory_key}")
+            
+            # Use LangChain LLM directly (avoiding template formatting issues)
             full_prompt = (
-                self.valuation_prompt
+                self.valuation_prompt_text
                 + "\n\nFinancial Data JSON:\n"
                 + json.dumps(financial_data, indent=2)
             )
+            response = self.langchain_llm.invoke(full_prompt)
 
-            response = self.model.generate_content(
-                full_prompt, generation_config=self.generation_config
-            )
+            if not response:
+                raise ValueError("No response generated from LangChain")
 
-            if not response.text:
-                raise ValueError("No response generated from Gemini")
+            valuation_result = self._parse_response(response)
+            
+            # Cache the result
+            self.valuation_memory[memory_key] = valuation_result
+            print(f"DEBUG: Cached valuation result for key: {memory_key}")
 
-            valuation_result = self._parse_response(response.text)
-
-            return {"success": True, "data": valuation_result}
+            return {"success": True, "data": valuation_result, "cached": False}
 
         except Exception as e:
-            return {"success": False, "error": f"Valuation analysis error: {str(e)}"}
+            print(f"DEBUG: LangChain valuation failed: {e}, falling back to original Gemini")
+            # Fallback to original method
+            try:
+                full_prompt = (
+                    self.valuation_prompt_text
+                    + "\n\nFinancial Data JSON:\n"
+                    + json.dumps(financial_data, indent=2)
+                )
+
+                response = self.model.generate_content(
+                    full_prompt, generation_config=self.generation_config
+                )
+
+                if not response.text:
+                    raise ValueError("No response generated from Gemini")
+
+                valuation_result = self._parse_response(response.text)
+
+                return {"success": True, "data": valuation_result, "fallback": True}
+
+            except Exception as fallback_e:
+                return {"success": False, "error": f"Valuation analysis error: {str(fallback_e)}"}
+
+    def _generate_memory_key(self, financial_data):
+        """Generate memory key based on company data + date for caching"""
+        try:
+            # Try to extract company name from various possible locations
+            company_name = "unknown"
+            
+            # Look for company name in balance sheet or income statement
+            if isinstance(financial_data, dict):
+                # Check for common company identifier fields
+                if "company_name" in financial_data:
+                    company_name = financial_data["company_name"]
+                elif "entity_name" in financial_data:
+                    company_name = financial_data["entity_name"]
+                elif "sector" in financial_data:
+                    # Use sector + revenue as proxy identifier
+                    sector = financial_data.get("sector", "unknown")
+                    revenue_2023 = None
+                    if "income_statement" in financial_data and "revenue_sales" in financial_data["income_statement"]:
+                        revenue_2023 = financial_data["income_statement"]["revenue_sales"].get("2023", 0)
+                    company_name = f"{sector}_{revenue_2023}" if revenue_2023 else sector
+            
+            # Get today's date for daily cache expiry
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            # Create hash of financial data for uniqueness
+            data_str = json.dumps(financial_data, sort_keys=True)
+            data_hash = hashlib.md5(data_str.encode()).hexdigest()[:8]
+            
+            memory_key = f"{company_name}_{today}_{data_hash}"
+            return memory_key
+        except Exception as e:
+            # Fallback to just data hash + date
+            data_str = json.dumps(financial_data, sort_keys=True)
+            data_hash = hashlib.md5(data_str.encode()).hexdigest()[:8]
+            today = datetime.now().strftime("%Y-%m-%d")
+            return f"unknown_{today}_{data_hash}"
 
     def _parse_response(self, response_text):
         try:

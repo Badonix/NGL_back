@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
 import logging
 from config import Config
@@ -37,6 +37,15 @@ def create_app():
     app.register_blueprint(startup_bp)
     app.register_blueprint(competitor_bp)
     app.register_blueprint(sec_lookup_bp)
+
+    @app.route('/health', methods=['GET'])
+    def health_check():
+        """Health check endpoint for chat agents"""
+        return jsonify({
+            'status': 'healthy',
+            'message': 'NGL Financial API is running',
+            'version': '1.0.0'
+        })
 
     return app
 
