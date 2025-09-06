@@ -48,20 +48,18 @@ def analyze_loan():
             logger.error("No loan data provided")
             return ErrorHandler.validation_error("No loan data provided")
 
-        # Extract required fields
         required_fields = ["financial_data", "valuation_data", "loan_request"]
         missing_fields = [field for field in required_fields if field not in loan_data]
-        
+
         if missing_fields:
             logger.error(f"Missing required fields: {missing_fields}")
             return ErrorHandler.validation_error(f"Missing required fields: {missing_fields}")
 
-        # Analyze the loan request using Gemini
         try:
             logger.info("Starting loan analysis with Gemini")
             result = gemini_extractor.analyze_loan_request(
                 loan_data["financial_data"],
-                loan_data["valuation_data"], 
+                loan_data["valuation_data"],
                 loan_data["loan_request"]
             )
             logger.info("Loan analysis completed successfully")

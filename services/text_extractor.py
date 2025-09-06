@@ -34,16 +34,16 @@ class TextExtractor:
     @staticmethod
     def _extract_from_pdf(file_path: str) -> str:
         text = ""
-        
+
         try:
             reader = PdfReader(file_path)
-            
+
             if reader.is_encrypted:
                 try:
                     reader.decrypt("")
                 except Exception:
                     raise ValueError("PDF is password-protected and cannot be read without the password")
-            
+
             if len(reader.pages) == 0:
                 raise ValueError("PDF file contains no pages")
 
@@ -60,7 +60,7 @@ class TextExtractor:
                 raise ValueError("No text could be extracted from PDF")
 
             return text
-            
+
         except FileNotDecryptedError:
             raise ValueError("PDF is encrypted and requires a password")
         except PdfReadError as e:

@@ -12,19 +12,19 @@ class ErrorHandler:
             "error_type": error_type,
             "success": False
         }), status_code
-    
+
     @staticmethod
     def validation_error(message):
         return ErrorHandler.create_error_response(message, 400, "validation_error")
-    
+
     @staticmethod
     def file_error(message):
         return ErrorHandler.create_error_response(message, 400, "file_error")
-    
+
     @staticmethod
     def processing_error(message):
         return ErrorHandler.create_error_response(message, 500, "processing_error")
-    
+
     @staticmethod
     def api_error(message):
         return ErrorHandler.create_error_response(message, 503, "api_error")
@@ -46,5 +46,5 @@ def handle_exceptions(f):
         except Exception as e:
             logger.error(f"Unexpected error: {str(e)}")
             return ErrorHandler.processing_error(f"An unexpected error occurred: {str(e)}")
-    
+
     return decorated_function

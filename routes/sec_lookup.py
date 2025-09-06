@@ -32,26 +32,24 @@ def lookup_company():
     """
     try:
         data = request.get_json()
-        
+
         if not data or 'company_name' not in data:
             return ErrorHandler.validation_error("Company name is required")
-        
+
         company_name = data['company_name'].strip()
         if not company_name:
             return ErrorHandler.validation_error("Company name cannot be empty")
-        
+
         threshold = data.get('threshold', 75)
-        
-        # Perform lookup
+
         result = sec_lookup_service.lookup_company(company_name, threshold)
-        
-        # Return the result directly since it already has the proper success/error structure
+
         return result
-        
+
     except Exception as e:
         return ErrorHandler.processing_error(f"SEC lookup failed: {str(e)}")
 
-@sec_lookup_bp.route('/select-company', methods=['POST'])  
+@sec_lookup_bp.route('/select-company', methods=['POST'])
 def select_company():
     """
     Select a specific company from suggestions
@@ -63,19 +61,17 @@ def select_company():
     """
     try:
         data = request.get_json()
-        
+
         if not data or 'company_name' not in data:
             return ErrorHandler.validation_error("Company name is required")
-        
+
         company_name = data['company_name'].strip()
         if not company_name:
             return ErrorHandler.validation_error("Company name cannot be empty")
-        
-        # Force exact match with high threshold
+
         result = sec_lookup_service.lookup_company(company_name, threshold=95)
-        
-        # Return the result directly since it already has the proper success/error structure
+
         return result
-        
+
     except Exception as e:
         return ErrorHandler.processing_error(f"Company selection failed: {str(e)}")

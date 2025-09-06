@@ -16,7 +16,7 @@ class Config:
     FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
     FLASK_PORT = int(os.getenv("FLASK_PORT", 5000))
 
-    MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 16MB max file size
+    MAX_CONTENT_LENGTH = 50 * 1024 * 1024
 
     @classmethod
     def ensure_directories(cls):

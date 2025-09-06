@@ -25,31 +25,26 @@ class GeminiFinancialExtractor:
         self.financial_prompt = self._get_financial_prompt()
         self.investment_prompt = self._get_investment_prompt()
         self.loan_prompt = self._get_loan_prompt()
-        
-        # LangChain setup for extraction and fast investment analysis
+
         try:
-            # LLM for financial extraction (higher token limit)
             self.langchain_extraction_llm = GoogleGenerativeAI(
                 model="gemini-2.5-flash-lite",
                 google_api_key=Config.GEMINI_API_KEY,
                 temperature=0.1,
-                max_output_tokens=16384  # Same as original config
+                max_output_tokens=16384
             )
-            
-            # LLM for fast investment (lower token limit)
+
             self.langchain_llm = GoogleGenerativeAI(
                 model="gemini-2.5-flash-lite",
                 google_api_key=Config.GEMINI_API_KEY,
                 temperature=0.1,
                 max_output_tokens=2000
             )
-            
-            # Store the fast investment template (will use direct LLM calls)
+
             self.fast_investment_template_text = self._get_fast_investment_template()
-            
-            # Use LangChain LLM directly instead of chain to avoid template issues
+
             self.fast_investment_chain = None
-            
+
             print("DEBUG: LangChain extraction and fast investment LLMs initialized successfully")
         except Exception as e:
             print(f"WARNING: LangChain initialization failed: {e}, will use fallback")
@@ -113,38 +108,35 @@ OUTPUT_SCHEMA (return exactly this JSON structure):
 IMPORTANT: Return ONLY the JSON structure above. No explanations or markdown outside the JSON."""
 
     def extract_financial_data(self, document_text):
-        # Try LangChain first if available
         if self.langchain_extraction_llm:
             try:
                 print("DEBUG: Using LangChain for financial data extraction")
-                
+
                 full_prompt = self.financial_prompt + document_text
                 print(f"DEBUG: Sending {len(document_text)} characters to LangChain")
                 print(f"DEBUG: Document contains {document_text.count('--- FILE:')} file separators")
-                
+
                 response_text = self.langchain_extraction_llm.invoke(full_prompt)
-                
+
                 if not response_text:
                     raise ValueError("No response from LangChain")
-                
+
                 print(f"LangChain response length: {len(response_text)} characters")
-                
+
                 if len(response_text.strip()) < 10:
                     raise ValueError(f"Response too short: '{response_text.strip()}'")
 
                 financial_data = self._parse_response(response_text)
-                
+
                 print(f"DEBUG: Parsed financial_analysis keys: {financial_data.get('financial_analysis', {}).keys() if 'financial_analysis' in financial_data else 'No financial_analysis'}")
                 if 'financial_analysis' in financial_data and 'income_statement' in financial_data['financial_analysis']:
                     revenue_years = list(financial_data['financial_analysis']['income_statement'].get('revenue_sales', {}).keys())
                     print(f"DEBUG: Revenue data extracted for years: {revenue_years}")
-                    
-                    # Log a sample of the raw response to see what AI is returning
+
                     print(f"DEBUG: Raw response preview: {response_text[:500]}...")
                     if "2021" in response_text or "2022" in response_text:
                         print(f"DEBUG: Found 2021/2022 in raw response but not in parsed data!")
-                    
-                    # Check all financial statement sections for years
+
                     for section_name, section_data in financial_data['financial_analysis'].items():
                         if isinstance(section_data, dict):
                             all_years = set()
@@ -153,8 +145,7 @@ IMPORTANT: Return ONLY the JSON structure above. No explanations or markdown out
                                     all_years.update(item_data.keys())
                             if all_years:
                                 print(f"DEBUG: {section_name} contains years: {sorted(all_years)}")
-                
-                # Check summarized_data for year mentions
+
                 if 'summerized_data' in financial_data:
                     summarized_text = str(financial_data['summerized_data'])
                     years_in_summary = []
@@ -163,7 +154,7 @@ IMPORTANT: Return ONLY the JSON structure above. No explanations or markdown out
                             years_in_summary.append(year)
                     print(f"DEBUG: summarized_data mentions years: {years_in_summary}")
                     print(f"DEBUG: summarized_data length: {len(summarized_text)} characters")
-                    
+
                 pdf_result = self._generate_pdf_if_needed(financial_data)
 
                 return {
@@ -172,12 +163,10 @@ IMPORTANT: Return ONLY the JSON structure above. No explanations or markdown out
                     "pdf_result": pdf_result,
                     "used_langchain": True
                 }
-                
+
             except Exception as e:
                 print(f"DEBUG: LangChain extraction failed: {e}, falling back to original Gemini")
-                # Continue to fallback below
-        
-        # Fallback to original Gemini method
+
         print("DEBUG: Using fallback Gemini for financial data extraction")
         for attempt in range(2):
             try:
@@ -192,10 +181,10 @@ IMPORTANT: Return ONLY the JSON structure above. No explanations or markdown out
                     print("Gemini attempt 2: Adjusted settings")
 
                 full_prompt = self.financial_prompt + document_text
-                
+
                 print(f"DEBUG: Sending {len(document_text)} characters to Gemini")
                 print(f"DEBUG: Document contains {document_text.count('--- FILE:')} file separators")
-                
+
                 response = self.model.generate_content(
                     full_prompt, generation_config=config
                 )
@@ -208,23 +197,21 @@ IMPORTANT: Return ONLY the JSON structure above. No explanations or markdown out
                     raise ValueError("No text content in Gemini response")
 
                 print(f"Gemini response length: {len(response_text)} characters")
-                
+
                 if len(response_text.strip()) < 10:
                     raise ValueError(f"Response too short: '{response_text.strip()}'")
 
                 financial_data = self._parse_response(response_text)
-                
+
                 print(f"DEBUG: Parsed financial_analysis keys: {financial_data.get('financial_analysis', {}).keys() if 'financial_analysis' in financial_data else 'No financial_analysis'}")
                 if 'financial_analysis' in financial_data and 'income_statement' in financial_data['financial_analysis']:
                     revenue_years = list(financial_data['financial_analysis']['income_statement'].get('revenue_sales', {}).keys())
                     print(f"DEBUG: Revenue data extracted for years: {revenue_years}")
-                    
-                    # Log a sample of the raw response to see what AI is returning
+
                     print(f"DEBUG: Raw response preview: {response_text[:500]}...")
                     if "2021" in response_text or "2022" in response_text:
                         print(f"DEBUG: Found 2021/2022 in raw response but not in parsed data!")
-                    
-                    # Check all financial statement sections for years
+
                     for section_name, section_data in financial_data['financial_analysis'].items():
                         if isinstance(section_data, dict):
                             all_years = set()
@@ -233,8 +220,7 @@ IMPORTANT: Return ONLY the JSON structure above. No explanations or markdown out
                                     all_years.update(item_data.keys())
                             if all_years:
                                 print(f"DEBUG: {section_name} contains years: {sorted(all_years)}")
-                
-                # Check summarized_data for year mentions
+
                 if 'summerized_data' in financial_data:
                     summarized_text = str(financial_data['summerized_data'])
                     years_in_summary = []
@@ -281,11 +267,10 @@ IMPORTANT: Return ONLY the JSON structure above. No explanations or markdown out
                 continue
 
     def analyze_investment_data(self, document_text):
-        # Try LangChain first if available
         if self.langchain_extraction_llm:
             try:
                 print("DEBUG: Using LangChain for investment data analysis")
-                
+
                 full_prompt = self.investment_prompt + document_text
                 response_text = self.langchain_extraction_llm.invoke(full_prompt)
 
@@ -295,12 +280,10 @@ IMPORTANT: Return ONLY the JSON structure above. No explanations or markdown out
                 investment_data = self._parse_investment_response(response_text)
 
                 return {"success": True, "data": investment_data, "used_langchain": True}
-                
+
             except Exception as e:
                 print(f"DEBUG: LangChain investment analysis failed: {e}, falling back to original Gemini")
-                # Continue to fallback below
-        
-        # Fallback to original Gemini method
+
         print("DEBUG: Using fallback Gemini for investment data analysis")
         try:
             full_prompt = self.investment_prompt + document_text
@@ -345,15 +328,13 @@ IMPORTANT: Return ONLY the JSON structure above. No explanations or markdown out
         Analyze loan request using the financial data, valuation data, and loan request details
         """
         try:
-            # Prepare the loan analysis input for Gemini (same pattern as investment)
             loan_data = {
                 "financial_data": financial_data,
                 "valuation_data": valuation_data,
                 "loan_request": loan_request
             }
             loan_input = self._prepare_loan_input(loan_data)
-            
-            # Create the full prompt with explicit JSON sections like valuation
+
             full_prompt = self.loan_prompt + f"""
 
 FINANCIAL_DATA_JSON:
@@ -367,8 +348,7 @@ LOAN_REQUEST_JSON:
 
 INPUT (formatted for analysis):
 {json.dumps(loan_input, indent=2)}"""
-            
-            # Generate response using Gemini
+
             response = self.model.generate_content(
                 full_prompt, generation_config=self.generation_config
             )
@@ -377,7 +357,6 @@ INPUT (formatted for analysis):
             if not response_text:
                 raise ValueError("No text content in Gemini response")
 
-            # Parse the loan analysis response
             loan_analysis = self._parse_loan_response(response_text)
 
             return {"success": True, "data": loan_analysis}
@@ -394,7 +373,6 @@ INPUT (formatted for analysis):
         Use Gemini to aggregate the responses from 5 OpenRouter models into a final investment decision
         """
         try:
-            # Filter successful responses
             successful_responses = [r for r in model_responses if r["success"]]
 
             if not successful_responses:
@@ -404,7 +382,6 @@ INPUT (formatted for analysis):
                     "error": "No models provided valid responses",
                 }
 
-            # Build enhanced aggregation prompt for Gemini
             aggregation_prompt = f"""
 You are the final investment decision aggregator using Google Gemini. You have received responses from {len(successful_responses)} AI models (from OpenRouter), each with different weights/coefficients. Your task is to produce a final normalized investment decision that takes these coefficients into account and provides realistic, well-reasoned output.
 
@@ -538,7 +515,6 @@ ADDITIONAL INSTRUCTIONS:
 Now analyze the provided data and model responses, apply the coefficients appropriately, and RETURN the single JSON result that follows OUTPUT_SCHEMA.
 """
 
-            # Generate response using Gemini
             response = self.model.generate_content(
                 aggregation_prompt, generation_config=self.generation_config
             )
@@ -547,18 +523,16 @@ Now analyze the provided data and model responses, apply the coefficients approp
             if not response_text:
                 raise ValueError("No text content in Gemini response")
 
-            # Parse the aggregated response
             aggregated_result = self._parse_investment_response(response_text)
-            
+
             print(f"DEBUG: Gemini aggregation completed successfully")
             print(f"DEBUG: Final verdict: {aggregated_result.get('verdict', 'unknown')}")
             print(f"DEBUG: Final confidence: {aggregated_result.get('confidence', 0)}")
-            
+
             return aggregated_result
 
         except Exception as e:
             print(f"ERROR: Gemini aggregation failed: {str(e)}")
-            # Fallback: return the highest weighted successful response
             if successful_responses:
                 best_response = max(successful_responses, key=lambda x: x["weight"])
                 return best_response["response"]
@@ -895,7 +869,6 @@ Document content to analyze:
         try:
             response_text = response_text.strip()
 
-            # Try to find JSON content between ```json and ```
             if "```json" in response_text and "```" in response_text:
                 start_marker = "```json"
                 end_marker = "```"
@@ -903,12 +876,10 @@ Document content to analyze:
                 end_index = response_text.find(end_marker, start_index)
                 json_content = response_text[start_index:end_index].strip()
             elif "{" in response_text and "}" in response_text:
-                # Try to extract JSON directly
                 start_index = response_text.find("{")
                 end_index = response_text.rfind("}") + 1
                 json_content = response_text[start_index:end_index]
             else:
-                # Return raw text if no JSON structure found
                 return {
                     "investment_analysis": {
                         "summary": response_text,
@@ -1140,25 +1111,19 @@ Investment data to analyze:
         try:
             response_text = response_text.strip()
 
-            # Try multiple extraction methods
             json_text = None
 
-            # Method 1: Standard JSON extraction
             json_text = self._extract_json_content(response_text)
 
-            # Method 2: If that fails, try to find JSON boundaries more aggressively
             if not json_text or len(json_text.strip()) < 10:
-                # Look for any { } pair
                 start_brace = response_text.find("{")
                 end_brace = response_text.rfind("}")
                 if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
                     json_text = response_text[start_brace : end_brace + 1]
 
             if not json_text:
-                # Method 3: Extract from markdown code blocks more aggressively
                 import re
 
-                # Look for any content between ``` blocks
                 code_blocks = re.findall(
                     r"```(?:json)?\s*({.*?})\s*```",
                     response_text,
@@ -1168,20 +1133,16 @@ Investment data to analyze:
                     json_text = code_blocks[0]
 
             if not json_text:
-                # Fallback: try to extract key information manually
                 return self._extract_sufficiency_manually(response_text)
 
-            # Clean and parse JSON with enhanced cleaning
             json_text = self._clean_json_for_parsing(json_text)
 
             try:
                 parsed_data = json.loads(json_text)
             except json.JSONDecodeError:
-                # Try one more cleaning pass
                 json_text = self._aggressive_json_cleaning(json_text)
                 parsed_data = json.loads(json_text)
 
-            # Ensure all required fields exist with defaults
             return {
                 "sufficiency_percentage": parsed_data.get("sufficiency_percentage", 50),
                 "missing_data": parsed_data.get("missing_data", []),
@@ -1190,9 +1151,7 @@ Investment data to analyze:
             }
 
         except json.JSONDecodeError as e:
-            # Try to extract any valid data from partial JSON
             try:
-                # Look for percentage in the raw text
                 import re
 
                 percentage_match = re.search(
@@ -1200,15 +1159,13 @@ Investment data to analyze:
                 )
                 percentage = int(percentage_match.group(1)) if percentage_match else 40
 
-                # Try to extract missing data array
                 missing_match = re.search(
                     r'"missing_data":\s*\[(.*?)\]', response_text, re.DOTALL
                 )
                 missing_data = []
                 if missing_match:
-                    # Simple extraction of quoted strings
                     items = re.findall(r'"([^"]*)"', missing_match.group(1))
-                    missing_data = items[:10]  # Limit to first 10 items
+                    missing_data = items[:10]
 
                 if not missing_data:
                     missing_data = ["Data parsing incomplete - please try again"]
@@ -1240,17 +1197,14 @@ Investment data to analyze:
 
     def _clean_json_for_parsing(self, json_text):
         """Enhanced JSON cleaning for parsing"""
-        # Remove any leading/trailing whitespace
         json_text = json_text.strip()
 
-        # Remove any markdown formatting
         if json_text.startswith("```") and json_text.endswith("```"):
             json_text = json_text[3:-3].strip()
 
         if json_text.startswith("json"):
             json_text = json_text[4:].strip()
 
-        # Apply existing cleaning
         json_text = self._fix_common_json_issues(json_text)
 
         return json_text
@@ -1259,21 +1213,18 @@ Investment data to analyze:
         """More aggressive JSON cleaning as last resort"""
         import re
 
-        # Remove any text before the first {
         first_brace = json_text.find("{")
         if first_brace > 0:
             json_text = json_text[first_brace:]
 
-        # Remove any text after the last }
         last_brace = json_text.rfind("}")
         if last_brace != -1:
             json_text = json_text[: last_brace + 1]
 
-        # Fix common issues
-        json_text = re.sub(r",(\s*[}\]])", r"\1", json_text)  # Remove trailing commas
+        json_text = re.sub(r",(\s*[}\]])", r"\1", json_text)
         json_text = re.sub(
             r'([}\]])(\s*)(["\w])', r"\1,\2\3", json_text
-        )  # Add missing commas
+        )
 
         return json_text
 
@@ -1281,7 +1232,6 @@ Investment data to analyze:
         """Manual extraction when JSON parsing completely fails"""
         import re
 
-        # Try to extract percentage
         percentage_patterns = [
             r'sufficiency_percentage["\s]*:\s*(\d+)',
             r'percentage["\s]*:\s*(\d+)',
@@ -1289,14 +1239,13 @@ Investment data to analyze:
             r"(\d+)\s*percent",
         ]
 
-        percentage = 40  # Default
+        percentage = 40
         for pattern in percentage_patterns:
             match = re.search(pattern, response_text, re.IGNORECASE)
             if match:
                 percentage = int(match.group(1))
                 break
 
-        # Detect investment negative signals
         negative_signals = [
             "shit",
             "terrible",
@@ -1357,8 +1306,7 @@ Investment data to analyze:
         financial_data = loan_data.get("financial_data", {})
         valuation_data = loan_data.get("valuation_data", {})
         loan_request = loan_data.get("loan_request", {})
-        
-        # Build the loan input structure
+
         loan_input = {
             "company": {
                 "name": "Analyzed Company",
@@ -1372,17 +1320,14 @@ Investment data to analyze:
                 "requested_currency": "GEL"
             }
         }
-        
-        # Transform financial data to loan format
+
         if financial_data:
-            # Income Statement
             income_statement = financial_data.get("income_statement", {})
             loan_input["income_statement"] = {}
-            
+
             if "revenue_sales" in income_statement:
                 loan_input["income_statement"]["revenue"] = income_statement["revenue_sales"]
             if "operating_profit_ebit" in income_statement:
-                # Calculate EBITDA if we have EBIT and depreciation
                 ebit_data = income_statement["operating_profit_ebit"]
                 depreciation_data = income_statement.get("depreciation_amortization", {})
                 if ebit_data and depreciation_data:
@@ -1397,17 +1342,15 @@ Investment data to analyze:
                 loan_input["income_statement"]["net_income"] = income_statement["net_income"]
             if "income_tax_expense" in income_statement:
                 loan_input["income_statement"]["tax_expense"] = income_statement["income_tax_expense"]
-            
-            # Balance Sheet
+
             balance_sheet = financial_data.get("balance_sheet", {})
             loan_input["balance_sheet"] = {}
-            
-            # Calculate total assets if not provided
+
             current_assets = balance_sheet.get("cash_equivalents", {})
             accounts_receivable = balance_sheet.get("accounts_receivable", {})
             inventory = balance_sheet.get("inventory", {})
             ppe = balance_sheet.get("ppe", {})
-            
+
             total_assets = {}
             for year in set(list(current_assets.keys()) + list(accounts_receivable.keys()) + list(inventory.keys()) + list(ppe.keys())):
                 assets = 0
@@ -1421,14 +1364,13 @@ Investment data to analyze:
                     assets += self._safe_float_convert(ppe[year])
                 if assets > 0:
                     total_assets[year] = assets
-            
+
             loan_input["balance_sheet"]["total_assets"] = total_assets
-            
-            # Calculate total liabilities
+
             accounts_payable = balance_sheet.get("accounts_payable", {})
             short_term_debt = balance_sheet.get("short_term_debt", {})
             long_term_debt = balance_sheet.get("long_term_debt", {})
-            
+
             total_liabilities = {}
             for year in set(list(accounts_payable.keys()) + list(short_term_debt.keys()) + list(long_term_debt.keys())):
                 liabilities = 0
@@ -1440,11 +1382,10 @@ Investment data to analyze:
                     liabilities += self._safe_float_convert(long_term_debt[year])
                 if liabilities > 0:
                     total_liabilities[year] = liabilities
-            
+
             loan_input["balance_sheet"]["total_liabilities"] = total_liabilities
             loan_input["balance_sheet"]["equity"] = balance_sheet.get("shareholders_equity", {})
-            
-            # Current assets and liabilities for ratios
+
             current_assets_data = {}
             for year in set(list(current_assets.keys()) + list(accounts_receivable.keys()) + list(inventory.keys())):
                 assets = 0
@@ -1456,36 +1397,33 @@ Investment data to analyze:
                     assets += self._safe_float_convert(inventory[year])
                 if assets > 0:
                     current_assets_data[year] = assets
-            
+
             loan_input["balance_sheet"]["current_assets"] = current_assets_data
-            
+
             current_liabilities_data = {}
             for year in set(list(accounts_payable.keys())):
                 if year in accounts_payable and accounts_payable[year] is not None:
                     current_liabilities_data[year] = accounts_payable[year]
-            
+
             loan_input["balance_sheet"]["current_liabilities"] = current_liabilities_data
-            
-            # Add collateral information if available from valuation
+
             if valuation_data and "valuation_summary" in valuation_data:
                 estimated_value = self._safe_float_convert(valuation_data["valuation_summary"].get("final_estimated_value", 0))
                 if estimated_value > 0:
                     loan_input["balance_sheet"]["collateral"] = [
-                        {"type": "business_assets", "fair_value": estimated_value * 0.7},  # Conservative LTV
+                        {"type": "business_assets", "fair_value": estimated_value * 0.7},
                     ]
-            
-            # Cash Flow Statement
+
             cash_flow = financial_data.get("cash_flow_statement", {})
             loan_input["cash_flow"] = {}
-            
+
             if "cash_flow_from_operations" in cash_flow:
                 loan_input["cash_flow"]["operating_cash_flow"] = cash_flow["cash_flow_from_operations"]
             if "capital_expenditures" in cash_flow:
                 loan_input["cash_flow"]["capex"] = cash_flow["capital_expenditures"]
             if "interest_paid" in cash_flow:
                 loan_input["cash_flow"]["interest_paid"] = cash_flow["interest_paid"]
-            
-            # Estimate debt repayment from balance sheet changes
+
             if short_term_debt and long_term_debt:
                 debt_repayment = {}
                 years = sorted(set(list(short_term_debt.keys()) + list(long_term_debt.keys())))
@@ -1496,16 +1434,15 @@ Investment data to analyze:
                     curr_debt = self._safe_float_convert(short_term_debt.get(curr_year, 0)) + self._safe_float_convert(long_term_debt.get(curr_year, 0))
                     if prev_debt > curr_debt:
                         debt_repayment[curr_year] = prev_debt - curr_debt
-                
+
                 if debt_repayment:
                     loan_input["cash_flow"]["debt_repayment"] = debt_repayment
-        
-        # Add valuation information
+
         if valuation_data and "valuation_summary" in valuation_data:
             loan_input["valuation"] = {
                 "enterprise_value": self._safe_float_convert(valuation_data["valuation_summary"].get("final_estimated_value", 0))
             }
-        
+
         return loan_input
 
     def _parse_loan_response(self, response_text):
@@ -1514,28 +1451,24 @@ Investment data to analyze:
         """
         try:
             response_text = response_text.strip()
-            
-            # Extract JSON content using existing method
+
             json_text = self._extract_json_content(response_text)
-            
+
             if not json_text:
-                # Try to find JSON boundaries more aggressively
                 start_brace = response_text.find("{")
                 end_brace = response_text.rfind("}")
                 if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
                     json_text = response_text[start_brace : end_brace + 1]
-            
+
             if not json_text:
                 raise ValueError("No JSON content found in response")
-            
-            # Clean and parse JSON
+
             json_text = self._fix_common_json_issues(json_text)
             parsed_data = json.loads(json_text)
-            
+
             return parsed_data
-            
+
         except json.JSONDecodeError as e:
-            # Return a fallback analysis instead of error for better user experience
             return {
                 "decision": {
                     "status": "conditional",
@@ -1993,26 +1926,22 @@ Analyze the provided loan request data and return the JSON structure."""
         Calculate investment validity using LangChain + Gemini (fast single-model version)
         """
         try:
-            # Try LangChain first
             if self.langchain_llm:
                 print("DEBUG: Using LangChain LLM for fast investment analysis")
-                
-                # Manually format the prompt (avoiding template issues)
+
                 formatted_prompt = self.fast_investment_template_text.format(
                     financial_data=json.dumps(financial_data, indent=2),
                     valuation_data=json.dumps(valuation_data, indent=2),
                     investment_data=json.dumps(investment_data, indent=2)
                 )
-                
-                # Use LangChain LLM directly
+
                 response_text = self.langchain_llm.invoke(formatted_prompt)
-                
+
                 if not response_text:
                     raise ValueError("Empty response from LangChain")
-                
+
                 parsed_response = self._parse_investment_validity_response(response_text)
-                
-                # Create individual response structure matching OpenRouter format
+
                 individual_response = {
                     "model": "langchain/gemini-2.5-flash-lite",
                     "weight": 1.0,
@@ -2020,7 +1949,7 @@ Analyze the provided loan request data and return the JSON structure."""
                     "success": True,
                     "processing_time": 0.0
                 }
-                
+
                 return {
                     "success": True,
                     "data": {
@@ -2031,12 +1960,11 @@ Analyze the provided loan request data and return the JSON structure."""
                         "used_langchain": True
                     }
                 }
-            
+
             else:
                 print("DEBUG: LangChain not available, using fallback Gemini")
-                # Fallback to original method
                 prompt = self._build_investment_validity_prompt(financial_data, valuation_data, investment_data)
-                
+
                 response = self.model.generate_content(
                     prompt,
                     generation_config=genai.types.GenerationConfig(
@@ -2044,16 +1972,15 @@ Analyze the provided loan request data and return the JSON structure."""
                         max_output_tokens=2000,
                     ),
                 )
-                
+
                 if not response.text:
                     return {
                         "success": False,
                         "error": "Empty response from Gemini API"
                     }
-                    
+
                 parsed_response = self._parse_investment_validity_response(response.text)
-                
-                # Create individual response structure matching OpenRouter format
+
                 individual_response = {
                     "model": "google/gemini-pro",
                     "weight": 1.0,
@@ -2061,7 +1988,7 @@ Analyze the provided loan request data and return the JSON structure."""
                     "success": True,
                     "processing_time": 0.0
                 }
-                
+
                 return {
                     "success": True,
                     "data": {
@@ -2072,13 +1999,12 @@ Analyze the provided loan request data and return the JSON structure."""
                         "used_langchain": False
                     }
                 }
-            
+
         except Exception as e:
             print(f"DEBUG: LangChain fast investment failed: {e}, trying fallback")
-            # Final fallback to original method
             try:
                 prompt = self._build_investment_validity_prompt(financial_data, valuation_data, investment_data)
-                
+
                 response = self.model.generate_content(
                     prompt,
                     generation_config=genai.types.GenerationConfig(
@@ -2086,15 +2012,15 @@ Analyze the provided loan request data and return the JSON structure."""
                         max_output_tokens=2000,
                     ),
                 )
-                
+
                 if not response.text:
                     return {
                         "success": False,
                         "error": "Empty response from Gemini API"
                     }
-                    
+
                 parsed_response = self._parse_investment_validity_response(response.text)
-                
+
                 individual_response = {
                     "model": "google/gemini-pro-fallback",
                     "weight": 1.0,
@@ -2102,7 +2028,7 @@ Analyze the provided loan request data and return the JSON structure."""
                     "success": True,
                     "processing_time": 0.0
                 }
-                
+
                 return {
                     "success": True,
                     "data": {
@@ -2116,7 +2042,7 @@ Analyze the provided loan request data and return the JSON structure."""
                 }
             except Exception as fallback_e:
                 return {
-                    "success": False, 
+                    "success": False,
                     "error": f"Fast investment analysis error: {str(fallback_e)}"
                 }
 
@@ -2125,10 +2051,8 @@ Analyze the provided loan request data and return the JSON structure."""
         Use Gemini to search for potential investors and investment opportunities based on the business analysis
         """
         try:
-            # Build investor search prompt for Gemini
             investor_prompt = self._get_investor_search_prompt()
-            
-            # Create the full prompt with all data sections
+
             full_prompt = investor_prompt + f"""
 
 FINANCIAL_DATA_JSON:
@@ -2139,8 +2063,7 @@ VALUATION_DATA_JSON:
 
 INVESTMENT_DATA_JSON:
 {json.dumps(investment_data, indent=2)}"""
-            
-            # Generate response using Gemini
+
             response = self.model.generate_content(
                 full_prompt, generation_config=self.generation_config
             )
@@ -2149,7 +2072,6 @@ INVESTMENT_DATA_JSON:
             if not response_text:
                 raise ValueError("No text content in Gemini response")
 
-            # Parse the investor search response
             investor_analysis = self._parse_investor_response(response_text)
 
             return {"success": True, "data": investor_analysis}
@@ -2305,28 +2227,24 @@ Analyze the provided business data and return specific investor search recommend
         """
         try:
             response_text = response_text.strip()
-            
-            # Extract JSON content using existing method
+
             json_text = self._extract_json_content(response_text)
-            
+
             if not json_text:
-                # Try to find JSON boundaries more aggressively
                 start_brace = response_text.find("{")
                 end_brace = response_text.rfind("}")
                 if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
                     json_text = response_text[start_brace : end_brace + 1]
-            
+
             if not json_text:
                 raise ValueError("No JSON content found in response")
-            
-            # Clean and parse JSON
+
             json_text = self._fix_common_json_issues(json_text)
             parsed_data = json.loads(json_text)
-            
+
             return parsed_data
-            
+
         except json.JSONDecodeError as e:
-            # Return a fallback analysis instead of error for better user experience
             return {
                 "investor_search_strategy": {
                     "company_profile": {
@@ -2492,8 +2410,7 @@ Analyze the provided business data and return specific investor search recommend
         """
         try:
             startup_prompt = self._get_startup_analysis_prompt()
-            
-            # Prepare input data
+
             input_data = {
                 "startup_description": startup_description,
                 "flags": flags or {
@@ -2502,23 +2419,23 @@ Analyze the provided business data and return specific investor search recommend
                     "include_investors": True
                 }
             }
-            
+
             full_prompt = startup_prompt + f"""
 INPUT:
 {json.dumps(input_data, indent=2)}
 """
-            
+
             response = self.model.generate_content(
                 full_prompt, generation_config=self.generation_config
             )
             response_text = self._extract_response_text(response)
-            
+
             if not response_text:
                 raise ValueError("No text content in Gemini response")
-            
+
             startup_analysis = self._parse_startup_response(response_text)
             return {"success": True, "data": startup_analysis}
-            
+
         except Exception as e:
             return {
                 "success": False,
@@ -2674,29 +2591,24 @@ Case 2 — Insufficient Data
         """
         try:
             response_text = response_text.strip()
-            
-            # Try to extract JSON content from the response
+
             json_text = self._extract_json_content(response_text)
-            
+
             if not json_text:
-                # Try to find JSON manually if extraction fails
                 start_brace = response_text.find("{")
                 end_brace = response_text.rfind("}")
                 if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
                     json_text = response_text[start_brace : end_brace + 1]
-            
+
             if not json_text:
                 raise ValueError("No JSON content found in response")
-            
-            # Fix common JSON issues
+
             json_text = self._fix_common_json_issues(json_text)
-            
-            # Parse the JSON
+
             parsed_data = json.loads(json_text)
             return parsed_data
-            
+
         except json.JSONDecodeError as e:
-            # Return fallback structure for insufficient data case
             return {
                 "status": "insufficient_data",
                 "valuation_summary": {
@@ -2742,9 +2654,8 @@ Case 2 — Insufficient Data
                 "summary": f"Unable to parse response. JSON error: {str(e)}",
                 "error": str(e)
             }
-            
+
         except Exception as e:
-            # Return generic error fallback
             return {
                 "status": "insufficient_data",
                 "valuation_summary": {
@@ -2796,24 +2707,24 @@ Case 2 — Insufficient Data
         """
         try:
             competitor_prompt = self._get_competitor_analysis_prompt()
-            
+
             full_prompt = competitor_prompt + f"""
 
 COMPANY_DATA:
 {company_data}
 """
-            
+
             response = self.model.generate_content(
                 full_prompt, generation_config=self.generation_config
             )
             response_text = self._extract_response_text(response)
-            
+
             if not response_text:
                 raise ValueError("No text content in Gemini response")
-            
+
             competitor_analysis = self._parse_competitor_response(response_text)
             return {"success": True, "data": competitor_analysis}
-            
+
         except Exception as e:
             return {
                 "success": False,
@@ -2870,46 +2781,38 @@ IMPORTANT:
         """
         try:
             response_text = response_text.strip()
-            
-            # Try to extract JSON content from the response
+
             json_text = self._extract_json_content(response_text)
-            
+
             if not json_text:
-                # Try to find JSON manually if extraction fails
                 start_brace = response_text.find("{")
                 end_brace = response_text.rfind("}")
                 if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
                     json_text = response_text[start_brace : end_brace + 1]
-            
+
             if not json_text:
                 raise ValueError("No JSON content found in response")
-            
-            # Fix common JSON issues
+
             json_text = self._fix_common_json_issues(json_text)
-            
-            # Parse the JSON
+
             parsed_data = json.loads(json_text)
-            
-            # Ensure we have the expected structure
+
             if "competitors" not in parsed_data:
                 parsed_data = {"competitors": []}
-            
-            # Ensure competitors is a list
+
             if not isinstance(parsed_data["competitors"], list):
                 parsed_data["competitors"] = []
-            
+
             return parsed_data
-            
+
         except json.JSONDecodeError as e:
-            # Return fallback structure for JSON parsing errors
             return {
                 "competitors": [],
                 "error": f"JSON parsing error: {str(e)}",
                 "raw_response": response_text[:500] if response_text else "No response"
             }
-            
+
         except Exception as e:
-            # Return generic error fallback
             return {
                 "competitors": [],
                 "error": f"Unexpected error: {str(e)}",
@@ -3321,11 +3224,9 @@ INSTRUCTIONS:
         try:
             response_text = response_text.strip()
 
-            # Try to extract JSON content from the response
             json_text = self._extract_json_content(response_text)
 
             if not json_text:
-                # Try to find JSON manually if extraction fails
                 start_brace = response_text.find("{")
                 end_brace = response_text.rfind("}")
                 if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
@@ -3334,15 +3235,12 @@ INSTRUCTIONS:
             if not json_text:
                 raise ValueError("No JSON content found in response")
 
-            # Fix common JSON issues
             json_text = self._fix_common_json_issues(json_text)
 
-            # Parse the JSON
             parsed_data = json.loads(json_text)
             return parsed_data
 
         except json.JSONDecodeError as e:
-            # Return fallback structure for JSON parsing errors
             return {
                 "comparison_summary": {
                     "company_a_name": "Company A",
@@ -3360,7 +3258,6 @@ INSTRUCTIONS:
             }
 
         except Exception as e:
-            # Return generic error fallback
             return {
                 "comparison_summary": {
                     "company_a_name": "Company A",
@@ -3474,7 +3371,7 @@ Return ONLY the JSON structure:"""
     def _parse_investment_validity_response(self, response_text):
         """Parse investment validity response from Gemini (reuse existing parser)"""
         return self._parse_investment_response(response_text)
-    
+
     def resolve_company_name(self, user_input, available_companies):
         """
         Use Gemini to resolve user input to official SEC company names
@@ -3486,10 +3383,9 @@ Return ONLY the JSON structure:"""
         Returns:
             Dict with resolved company suggestions
         """
-        
-        # Limit available companies to avoid huge prompts
+
         company_sample = available_companies[:500] if len(available_companies) > 500 else available_companies
-        
+
         prompt = f"""
 You are a company name resolver for SEC database lookups. 
 
@@ -3517,28 +3413,27 @@ Return ONLY a JSON array with top 3 suggestions, ordered by confidence:
 
 If no reasonable matches found, return empty array [].
 """
-        
+
         try:
             response = self.model.generate_content(
                 prompt,
                 generation_config=self.generation_config
             )
-            
-            # Parse JSON response
+
             response_text = response.text.strip()
             if response_text.startswith('```json'):
                 response_text = response_text[7:-3]
             elif response_text.startswith('```'):
                 response_text = response_text[3:-3]
-                
+
             suggestions = json.loads(response_text)
-            
+
             return {
                 "success": True,
                 "suggestions": suggestions,
                 "error": None
             }
-            
+
         except Exception as e:
             return {
                 "success": False,

@@ -21,12 +21,10 @@ class OpenRouterService:
             "HTTP-Referer": "http://localhost:5000",
             "X-Title": "NGL Financial Analyzer",
         }
-        
-        # Configuration for parallel processing
-        self.max_concurrent_workers = max_concurrent_workers
-        self.model_timeout = 30  # seconds per model
 
-        # Initialize Gemini service for final aggregation
+        self.max_concurrent_workers = max_concurrent_workers
+        self.model_timeout = 30
+
         try:
             self.gemini_service = GeminiFinancialExtractor()
             print("DEBUG: Gemini service initialized for aggregation")
@@ -180,7 +178,6 @@ Be precise and specific in your assessment. The percentage should reflect how co
         try:
             response_text = response_text.strip()
 
-            # Try to find JSON content
             if "{" in response_text and "}" in response_text:
                 start_index = response_text.find("{")
                 end_index = response_text.rfind("}") + 1
@@ -198,7 +195,6 @@ Be precise and specific in your assessment. The percentage should reflect how co
                     "critical_gaps": parsed_data.get("critical_gaps", []),
                 }
             else:
-                # Fallback if no JSON structure found
                 return {
                     "success": True,
                     "sufficiency_percentage": 50,
@@ -279,7 +275,6 @@ Be specific and actionable in your assessment. Focus on what investment informat
         Calculate investment validity using 5 AI models + final aggregation
         """
         try:
-            # Define the 5 models with their weights
             models = [
                 {"name": "meta-llama/llama-4-maverick", "weight": 0.30},
                 {"name": "meta-llama/llama-3.3-70b-instruct", "weight": 0.14},
@@ -288,44 +283,38 @@ Be specific and actionable in your assessment. Focus on what investment informat
                 {"name": "meta-llama/llama-4-scout", "weight": 0.22},
             ]
 
-            # Build the investment validity prompt
             prompt = self._build_investment_validity_prompt(
                 financial_data, valuation_data, investment_data
             )
 
-            # Collect responses from all 5 models in parallel
             print(f"DEBUG: Starting parallel processing of {len(models)} models")
             start_time = time.time()
-            
+
             model_responses = self._query_models_parallel(models, prompt)
-            
+
             end_time = time.time()
             successful_models = sum(1 for r in model_responses if r['success'])
             total_models = len(model_responses)
-            
+
             print(f"DEBUG: Parallel processing completed in {end_time - start_time:.2f} seconds")
             print(f"DEBUG: Successfully processed {successful_models}/{total_models} models")
-            
-            # Log individual model performance
+
             for response in model_responses:
                 status = "✓" if response['success'] else "✗"
                 time_str = f"{response.get('processing_time', 0):.2f}s" if response['success'] else "failed"
                 print(f"DEBUG: {status} {response['model']}: {time_str}")
-            
-            # Check if we have enough successful responses for aggregation
+
             if successful_models == 0:
                 raise Exception("All AI models failed to respond. Cannot calculate investment validity.")
             elif successful_models < 2:
                 print(f"WARNING: Only {successful_models} model(s) responded successfully. Results may be less reliable.")
-            
-            # Calculate time savings vs sequential processing
+
             if successful_models > 1:
                 avg_model_time = sum(r.get('processing_time', 0) for r in model_responses if r['success']) / successful_models
                 estimated_sequential_time = avg_model_time * total_models
                 time_saved = estimated_sequential_time - (end_time - start_time)
                 print(f"DEBUG: Estimated time saved: {time_saved:.2f}s ({time_saved/estimated_sequential_time*100:.1f}% faster)")
 
-            # Aggregate results and send to final model
             final_result = self._aggregate_model_responses(
                 model_responses, financial_data, valuation_data, investment_data
             )
@@ -349,16 +338,16 @@ Be specific and actionable in your assessment. Focus on what investment informat
     def _query_models_parallel(self, models, prompt):
         """Query multiple models in parallel using ThreadPoolExecutor"""
         model_responses = []
-        
+
         def query_single_model(model):
             """Query a single model and return structured response"""
             try:
                 start_time = time.time()
                 response = self._query_model(model["name"], prompt)
                 end_time = time.time()
-                
+
                 print(f"DEBUG: {model['name']} completed in {end_time - start_time:.2f}s")
-                
+
                 return {
                     "model": model["name"],
                     "weight": model["weight"],
@@ -376,27 +365,21 @@ Be specific and actionable in your assessment. Focus on what investment informat
                     "error": str(e),
                     "processing_time": 0
                 }
-        
-        # Use ThreadPoolExecutor for parallel processing
-        # Limit concurrent threads to avoid overwhelming the API and respect rate limits
-        # OpenRouter typically allows multiple concurrent requests
+
         max_workers = min(len(models), self.max_concurrent_workers)
-        
+
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all model queries
             future_to_model = {
-                executor.submit(query_single_model, model): model 
+                executor.submit(query_single_model, model): model
                 for model in models
             }
-            
-            # Collect results as they complete
+
             for future in as_completed(future_to_model):
                 model = future_to_model[future]
                 try:
                     result = future.result()
                     model_responses.append(result)
                 except Exception as e:
-                    # This should rarely happen since we handle exceptions in query_single_model
                     print(f"DEBUG: Unexpected error for {model['name']}: {str(e)}")
                     model_responses.append({
                         "model": model["name"],
@@ -406,11 +389,10 @@ Be specific and actionable in your assessment. Focus on what investment informat
                         "error": f"Thread execution error: {str(e)}",
                         "processing_time": 0
                     })
-        
-        # Sort responses by original model order for consistency
+
         model_names_order = [m["name"] for m in models]
         model_responses.sort(key=lambda x: model_names_order.index(x["model"]))
-        
+
         return model_responses
 
     def _query_model(self, model_name, prompt):
@@ -428,7 +410,6 @@ Be specific and actionable in your assessment. Focus on what investment informat
             "temperature": 0.1,
         }
 
-        # Use configurable timeout for model requests
         response = requests.post(
             self.base_url, headers=self.headers, json=payload, timeout=self.model_timeout
         )
@@ -444,7 +425,6 @@ Be specific and actionable in your assessment. Focus on what investment informat
     ):
         """Use Gemini to aggregate all model responses into a final investment decision"""
 
-        # Filter successful responses
         successful_responses = [r for r in model_responses if r["success"]]
 
         if not successful_responses:
@@ -454,7 +434,6 @@ Be specific and actionable in your assessment. Focus on what investment informat
                 "error": "No models provided valid responses",
             }
 
-        # Use Gemini for final aggregation if available
         if self.gemini_service:
             try:
                 print(f"DEBUG: Using Gemini for final aggregation of {len(successful_responses)} model responses")
@@ -465,12 +444,9 @@ Be specific and actionable in your assessment. Focus on what investment informat
                 return final_response
             except Exception as e:
                 print(f"WARNING: Gemini aggregation failed: {e}, falling back to LLaMA")
-                # Continue to fallback below
 
-        # Fallback: Use LLaMA for aggregation (original behavior)
         print(f"DEBUG: Using LLaMA fallback for aggregation")
         try:
-            # Build enhanced aggregation prompt for LLaMA
             aggregation_prompt = f"""
 You are the final investment decision aggregator. You have received responses from {len(successful_responses)} AI models, each with different weights/coefficients. Your task is to produce a final normalized investment decision that takes these coefficients into account and provides realistic, well-reasoned output.
 
@@ -526,7 +502,6 @@ Now analyze the provided data and model responses, apply the coefficients approp
             return final_response
         except Exception as e:
             print(f"WARNING: LLaMA aggregation also failed: {e}")
-            # Final fallback: return the highest weighted successful response
             best_response = max(successful_responses, key=lambda x: x["weight"])
             return best_response["response"]
 
@@ -535,7 +510,6 @@ Now analyze the provided data and model responses, apply the coefficients approp
         try:
             response_text = response_text.strip()
 
-            # Try to find JSON content
             if "```json" in response_text and "```" in response_text:
                 start_marker = "```json"
                 end_marker = "```"
@@ -575,7 +549,6 @@ Now analyze the provided data and model responses, apply the coefficients approp
     ):
         """Build the comprehensive investment validity prompt"""
 
-        # The exact prompt you provided with data injection
         prompt = f"""AI Investment Decision Prompt — Deterministic, Excel-Style (Consumes Pre-Computed Valuation, Stage- & Sector-Aware, Region-Adjusted, With Simple Summary for Non-Experts)
 
 ROLE

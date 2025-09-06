@@ -267,14 +267,12 @@ def calculate_investment_validity():
         financial_data = None
         valuation_data = None
         investment_data = None
-        
+
         if is_multipart:
-            # Handle multipart form data (with potential file uploads)
-            
-            # Process any uploaded files
+
             if request.files and "files" in request.files:
                 uploaded_files = request.files.getlist("files")
-                
+
                 for file in uploaded_files:
                     if file.filename == "":
                         continue
@@ -295,7 +293,6 @@ def calculate_investment_validity():
 
                     additional_file_text += extracted_text
 
-            # Get JSON data from form fields
             try:
                 financial_data_str = request.form.get("financial_data")
                 if financial_data_str:
@@ -319,7 +316,6 @@ def calculate_investment_validity():
 
 
         elif is_json:
-            # Handle pure JSON data (legacy support)
             data = request.get_json()
             if data:
                 financial_data = data.get("financial_data")
@@ -328,20 +324,18 @@ def calculate_investment_validity():
         else:
             return ErrorHandler.validation_error("Unsupported content type. Use multipart/form-data or application/json.")
 
-        # Validate required data
         if not all([financial_data, valuation_data, investment_data]):
             return ErrorHandler.validation_error(
                 "Financial data, valuation data, and investment data are all required"
             )
 
-        # Add any additional files uploaded for this analysis to investment data
         if additional_file_text:
             if not isinstance(investment_data, dict):
                 investment_data = {}
-            
+
             investment_data["additional_file_content"] = additional_file_text
             investment_data["additional_files_count"] = len(processed_files)
-                
+
             print(f"DEBUG VALIDITY: Added {len(processed_files)} additional files")
             print(f"DEBUG VALIDITY: Additional content length: {len(additional_file_text):,} characters")
 
@@ -360,7 +354,6 @@ def calculate_investment_validity():
     except Exception as e:
         return ErrorHandler.processing_error(str(e))
     finally:
-        # Cleanup uploaded files
         for file_info in processed_files:
             try:
                 FileService.cleanup_file(file_info["filepath"])
@@ -382,14 +375,12 @@ def calculate_investment_validity_fast():
         financial_data = None
         valuation_data = None
         investment_data = None
-        
+
         if is_multipart:
-            # Handle multipart form data (with potential file uploads)
-            
-            # Process any uploaded files
+
             if request.files and "files" in request.files:
                 uploaded_files = request.files.getlist("files")
-                
+
                 for file in uploaded_files:
                     if file.filename == "":
                         continue
@@ -410,7 +401,6 @@ def calculate_investment_validity_fast():
 
                     additional_file_text += extracted_text
 
-            # Get JSON data from form fields
             try:
                 financial_data_str = request.form.get("financial_data")
                 if financial_data_str:
@@ -434,7 +424,6 @@ def calculate_investment_validity_fast():
 
 
         elif is_json:
-            # Handle pure JSON data (legacy support)
             data = request.get_json()
             if data:
                 financial_data = data.get("financial_data")
@@ -443,20 +432,18 @@ def calculate_investment_validity_fast():
         else:
             return ErrorHandler.validation_error("Unsupported content type. Use multipart/form-data or application/json.")
 
-        # Validate required data
         if not all([financial_data, valuation_data, investment_data]):
             return ErrorHandler.validation_error(
                 "Financial data, valuation data, and investment data are all required"
             )
 
-        # Add any additional files uploaded for this analysis to investment data
         if additional_file_text:
             if not isinstance(investment_data, dict):
                 investment_data = {}
-            
+
             investment_data["additional_file_content"] = additional_file_text
             investment_data["additional_files_count"] = len(processed_files)
-                
+
             print(f"DEBUG FAST VALIDITY: Added {len(processed_files)} additional files")
             print(f"DEBUG FAST VALIDITY: Additional content length: {len(additional_file_text):,} characters")
 
@@ -475,7 +462,6 @@ def calculate_investment_validity_fast():
     except Exception as e:
         return ErrorHandler.processing_error(str(e))
     finally:
-        # Cleanup uploaded files
         for file_info in processed_files:
             try:
                 FileService.cleanup_file(file_info["filepath"])
@@ -497,14 +483,12 @@ def find_investors():
         financial_data = None
         valuation_data = None
         investment_data = None
-        
+
         if is_multipart:
-            # Handle multipart form data (with potential file uploads)
-            
-            # Process any uploaded files
+
             if request.files and "files" in request.files:
                 uploaded_files = request.files.getlist("files")
-                
+
                 for file in uploaded_files:
                     if file.filename == "":
                         continue
@@ -525,7 +509,6 @@ def find_investors():
 
                     additional_file_text += extracted_text
 
-            # Get JSON data from form fields
             try:
                 financial_data_str = request.form.get("financial_data")
                 if financial_data_str:
@@ -548,7 +531,6 @@ def find_investors():
                 pass
 
         elif is_json:
-            # Handle pure JSON data
             data = request.get_json()
             if data:
                 financial_data = data.get("financial_data")
@@ -557,20 +539,18 @@ def find_investors():
         else:
             return ErrorHandler.validation_error("Unsupported content type. Use multipart/form-data or application/json.")
 
-        # Validate required data
         if not all([financial_data, valuation_data, investment_data]):
             return ErrorHandler.validation_error(
                 "Financial data, valuation data, and investment data are all required"
             )
 
-        # Add any additional files uploaded for this analysis to investment data
         if additional_file_text:
             if not isinstance(investment_data, dict):
                 investment_data = {}
-            
+
             investment_data["additional_file_content"] = additional_file_text
             investment_data["additional_files_count"] = len(processed_files)
-                
+
             print(f"DEBUG INVESTOR SEARCH: Added {len(processed_files)} additional files")
             print(f"DEBUG INVESTOR SEARCH: Additional content length: {len(additional_file_text):,} characters")
 
@@ -589,7 +569,6 @@ def find_investors():
     except Exception as e:
         return ErrorHandler.processing_error(str(e))
     finally:
-        # Cleanup uploaded files
         for file_info in processed_files:
             try:
                 FileService.cleanup_file(file_info["filepath"])
